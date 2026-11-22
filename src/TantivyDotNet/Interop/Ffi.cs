@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using TantivyDotNet.Native;
 
 namespace TantivyDotNet.Interop;
@@ -58,12 +59,17 @@ internal static unsafe class Ffi
         }
     }
 
-    /// <summary>Copies a native buffer into a managed array and frees the buffer.</summary>
-    internal static byte[] TakeBytes(TdnString s)
+    /// <summary>
+    /// Parses a Rust-allocated JSON buffer straight from native memory, then frees it. The element
+    /// is backed by its own copy of the bytes (<see cref="JsonElement.ParseValue"/>), so it stays
+    /// valid without disposing anything.
+    /// </summary>
+    internal static JsonElement TakeJson(TdnString s)
     {
         try
         {
-            return s.ptr == null ? [] : new ReadOnlySpan<byte>(s.ptr, checked((int)s.len)).ToArray();
+            var reader = new Utf8JsonReader(new ReadOnlySpan<byte>(s.ptr, checked((int)s.len)));
+            return JsonElement.ParseValue(ref reader);
         }
         finally
         {

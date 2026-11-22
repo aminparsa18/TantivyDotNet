@@ -1,6 +1,6 @@
-//! Ordering search hits: by relevance through Tantivy's `TopDocs` (fast path, with Block-WAND),
-//! or by a list of keys (fast fields and/or score) with an optional search-after cursor through
-//! `SortedTop`, our own top-K collector.
+//! Ordering search hits: by relevance through Tantivy's `TopDocs` (fast path, with Block-WAND); by
+//! one numeric fast field through `FastTop`; or by any list of keys (fast fields and/or score)
+//! through `SortedTop`. Both of ours are top-K collectors that also take a search-after cursor.
 //!
 //! Request part: `"sort": [{"type": "field", "field": "year", "order": "desc"}, {"type": "score"}]`
 //! (absent or empty = by score), and `"search_after": {"keys": [...], "addr": [segment, doc]}`.
@@ -15,10 +15,11 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tantivy::collector::{Collector, FruitHandle, MultiCollector, MultiFruit, SegmentCollector, TopDocs};
-use tantivy::columnar::{BytesColumn, Column, StrColumn, TermOrdHit};
+use tantivy::collector::{Collector, Count, FruitHandle, MultiCollector, MultiFruit, SegmentCollector, TopDocs};
+use tantivy::columnar::{BytesColumn, Column, MonotonicallyMappableToU64, StrColumn, TermOrdHit};
+use tantivy::query::Query;
 use tantivy::schema::{FieldType, Schema};
-use tantivy::{DateTime, DocAddress, DocId, Score, SegmentOrdinal, SegmentReader, TantivyError};
+use tantivy::{DateTime, DocAddress, DocId, Score, Searcher, SegmentOrdinal, SegmentReader, TantivyError};
 
 use crate::ffi::{FfiError, FfiResult};
 
@@ -51,23 +52,31 @@ pub struct SearchAfter {
 /// tagged sort values (always present, so every hit can produce a cursor), and its address.
 pub type TopHit = (Score, Value, DocAddress);
 
+/// The collector for the requested page of hits, chosen by [`plan`].
+pub enum TopPlan {
+    /// By relevance, without a cursor: Tantivy's `TopDocs` (Block-WAND when it runs on its own).
+    Score { limit: usize, offset: usize },
+    /// By one numeric fast field.
+    Fast(FastTop),
+    /// Anything else.
+    Sorted(SortedTop),
+}
+
 pub enum TopHandle {
     Score(FruitHandle<Vec<(Score, DocAddress)>>),
     Sorted { handle: FruitHandle<SortedFruit>, scored: bool },
 }
 
-/// Adds the collector for the requested page of hits to `multi`.
-pub fn add(
+/// Picks the collector for the requested order and page.
+pub fn plan(
     sort: &[SortKeyRequest],
     after: Option<&SearchAfter>,
     limit: usize,
     offset: usize,
     schema: &Schema,
-    multi: &mut MultiCollector,
-) -> FfiResult<TopHandle> {
+) -> FfiResult<TopPlan> {
     if sort.is_empty() && after.is_none() {
-        let top = TopDocs::with_limit(limit).and_offset(offset).order_by_score();
-        return Ok(TopHandle::Score(multi.add_collector(top)));
+        return Ok(TopPlan::Score { limit, offset });
     }
     let keys: Vec<Key> = if sort.is_empty() {
         vec![Key { source: Source::Score, desc: true }]
@@ -75,27 +84,91 @@ pub fn add(
         sort.iter().map(|k| resolve(k, schema)).collect::<FfiResult<_>>()?
     };
     let cursor = after.map(|a| parse_cursor(a, &keys)).transpose()?;
-    let scored = keys.iter().any(|k| matches!(k.source, Source::Score));
-    let collector = SortedTop { keys: keys.into(), cursor, limit, offset };
-    Ok(TopHandle::Sorted { handle: multi.add_collector(collector), scored })
+    if let [Key { source: Source::Field { name, kind }, desc }] = keys.as_slice() {
+        if kind.is_numeric() {
+            let cursor = cursor.map(|c| (to_u64(&c.values[0]), c.addr));
+            return Ok(TopPlan::Fast(FastTop { field: name.clone(), kind: *kind, desc: *desc, cursor, limit, offset }));
+        }
+    }
+    Ok(TopPlan::Sorted(SortedTop { keys: keys.into(), cursor, limit, offset }))
 }
 
-pub fn extract(handle: TopHandle, fruits: &mut MultiFruit) -> FfiResult<Vec<TopHit>> {
-    match handle {
-        TopHandle::Score(h) => Ok(h
-            .extract(fruits)
-            .into_iter()
-            .map(|(score, addr)| (score, json!([{ "score": score }]), addr))
-            .collect()),
-        TopHandle::Sorted { handle, scored } => Ok(handle
-            .extract(fruits)
-            .into_iter()
-            .map(|(values, addr, score)| {
-                let tagged = Value::Array(values.iter().map(tagged).collect());
-                (if scored { score } else { Score::NAN }, tagged, addr)
-            })
-            .collect()),
+impl TopPlan {
+    /// Adds the collector to `multi` (when facets or aggregations share the pass).
+    pub fn add_to(self, multi: &mut MultiCollector) -> TopHandle {
+        match self {
+            TopPlan::Score { limit, offset } => {
+                TopHandle::Score(multi.add_collector(TopDocs::with_limit(limit).and_offset(offset).order_by_score()))
+            }
+            TopPlan::Fast(c) => TopHandle::Sorted { handle: multi.add_collector(c), scored: false },
+            TopPlan::Sorted(c) => {
+                let scored = c.requires_scoring();
+                TopHandle::Sorted { handle: multi.add_collector(c), scored }
+            }
+        }
     }
+
+    /// Runs the search for the total count and this page of hits, without a `MultiCollector`
+    /// (whose dynamic dispatch per document is measurable). With `separate_count`, the count is a
+    /// search of its own, which Tantivy answers from the posting list's length for a term query
+    /// and which lets `TopDocs` skip documents with Block-WAND; for other queries one pass is
+    /// cheaper, because both passes would visit every match.
+    pub fn search_with_count(
+        self,
+        searcher: &Searcher,
+        query: &dyn Query,
+        separate_count: bool,
+    ) -> tantivy::Result<(usize, Vec<TopHit>)> {
+        fn run<C: Collector>(
+            searcher: &Searcher,
+            query: &dyn Query,
+            top: C,
+            separate_count: bool,
+        ) -> tantivy::Result<(usize, C::Fruit)> {
+            if separate_count {
+                Ok((searcher.search(query, &Count)?, searcher.search(query, &top)?))
+            } else {
+                searcher.search(query, &(Count, top))
+            }
+        }
+        Ok(match self {
+            TopPlan::Score { limit, offset } => {
+                let top = TopDocs::with_limit(limit).and_offset(offset).order_by_score();
+                let (count, fruit) = run(searcher, query, top, separate_count)?;
+                (count, score_hits(fruit))
+            }
+            TopPlan::Fast(c) => {
+                let (count, fruit) = run(searcher, query, c, separate_count)?;
+                (count, sorted_hits(fruit, false))
+            }
+            TopPlan::Sorted(c) => {
+                let scored = c.requires_scoring();
+                let (count, fruit) = run(searcher, query, c, separate_count)?;
+                (count, sorted_hits(fruit, scored))
+            }
+        })
+    }
+}
+
+pub fn extract(handle: TopHandle, fruits: &mut MultiFruit) -> Vec<TopHit> {
+    match handle {
+        TopHandle::Score(h) => score_hits(h.extract(fruits)),
+        TopHandle::Sorted { handle, scored } => sorted_hits(handle.extract(fruits), scored),
+    }
+}
+
+fn score_hits(fruit: Vec<(Score, DocAddress)>) -> Vec<TopHit> {
+    fruit.into_iter().map(|(score, addr)| (score, json!([{ "score": score }]), addr)).collect()
+}
+
+fn sorted_hits(fruit: SortedFruit, scored: bool) -> Vec<TopHit> {
+    fruit
+        .into_iter()
+        .map(|(values, addr, score)| {
+            let tagged = Value::Array(values.iter().map(tagged).collect());
+            (if scored { score } else { Score::NAN }, tagged, addr)
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -112,6 +185,13 @@ enum Kind {
     Str,
     Bytes,
     Ip,
+}
+
+impl Kind {
+    /// Kinds whose fast column Tantivy can read as order-preserving `u64`s.
+    fn is_numeric(self) -> bool {
+        matches!(self, Kind::U64 | Kind::I64 | Kind::F64 | Kind::Bool | Kind::Date)
+    }
 }
 
 enum Source {
@@ -263,7 +343,166 @@ fn parse_cursor(after: &SearchAfter, keys: &[Key]) -> FfiResult<Cursor> {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Collector
+// FastTop: one numeric key
+// ---------------------------------------------------------------------------------------------
+
+/// Top-K by one numeric fast field (u64, i64, f64, bool, date). Values are read through
+/// Tantivy's order-preserving `u64` mapping, and each document becomes one `u128`,
+/// `missing (1 bit) | rank (64 bits) | doc (32 bits)`, where `rank` is the value, inverted for a
+/// descending order. Smaller is better, so missing values come last in both orders, ties go to
+/// the lower document, and a comparison is one integer compare.
+pub struct FastTop {
+    field: String,
+    kind: Kind,
+    desc: bool,
+    /// The cursor's value (`None` = missing, in the `u64` mapping) and address.
+    cursor: Option<(Option<u64>, DocAddress)>,
+    limit: usize,
+    offset: usize,
+}
+
+fn to_u64(value: &KeyValue) -> Option<u64> {
+    match *value {
+        KeyValue::U64(n) => Some(n),
+        KeyValue::I64(n) => Some(n.to_u64()),
+        KeyValue::F64(x) => Some(x.to_u64()),
+        KeyValue::Bool(b) => Some(b.to_u64()),
+        KeyValue::Date(us) => Some(DateTime::from_timestamp_micros(us).to_u64()),
+        _ => None,
+    }
+}
+
+impl FastTop {
+    fn pack(&self, value: Option<u64>, doc: DocId) -> u128 {
+        match value {
+            Some(v) => (u128::from(if self.desc { !v } else { v }) << 32) | u128::from(doc),
+            None => (1u128 << 96) | u128::from(doc),
+        }
+    }
+
+    fn unpack(&self, packed: u128) -> KeyValue {
+        if packed >> 96 != 0 {
+            return KeyValue::Missing;
+        }
+        let rank = (packed >> 32) as u64;
+        let v = if self.desc { !rank } else { rank };
+        match self.kind {
+            Kind::U64 => KeyValue::U64(v),
+            Kind::I64 => KeyValue::I64(i64::from_u64(v)),
+            Kind::F64 => KeyValue::F64(f64::from_u64(v)),
+            Kind::Bool => KeyValue::Bool(bool::from_u64(v)),
+            _ => KeyValue::Date(DateTime::from_u64(v).into_timestamp_micros()),
+        }
+    }
+}
+
+impl Collector for FastTop {
+    type Fruit = SortedFruit;
+    type Child = FastTopSegment;
+
+    fn for_segment(&self, segment_ord: SegmentOrdinal, reader: &SegmentReader) -> tantivy::Result<FastTopSegment> {
+        let column = reader.fast_fields().u64_lenient(&self.field)?.map(|(c, _)| c);
+        // Documents must sort strictly after the cursor: compare the key, then the address. Within
+        // this segment that is "packed > bound"; `None` accepts everything.
+        let after = self.cursor.and_then(|(value, addr)| {
+            let at = |doc| self.pack(value, doc);
+            match segment_ord.cmp(&addr.segment_ord) {
+                Ordering::Equal => Some(at(addr.doc_id)),
+                Ordering::Less => Some(at(DocId::MAX)),
+                Ordering::Greater => at(0).checked_sub(1),
+            }
+        });
+        let k = self.limit + self.offset;
+        let cap = 2 * k.max(32);
+        Ok(FastTopSegment {
+            column,
+            segment_ord,
+            desc: self.desc,
+            after,
+            k,
+            cap,
+            threshold: u128::MAX,
+            buffer: Vec::with_capacity(cap),
+        })
+    }
+
+    fn requires_scoring(&self) -> bool {
+        false
+    }
+
+    fn merge_fruits(&self, fruits: Vec<Vec<(u128, SegmentOrdinal)>>) -> tantivy::Result<SortedFruit> {
+        let mut all: Vec<(u128, SegmentOrdinal)> = fruits.into_iter().flatten().collect();
+        // Key first, then the address (segment, doc).
+        all.sort_unstable_by_key(|&(packed, seg)| (packed >> 32, seg, packed as u32));
+        Ok(all
+            .into_iter()
+            .skip(self.offset)
+            .take(self.limit)
+            .map(|(packed, seg)| (vec![self.unpack(packed)], DocAddress::new(seg, packed as u32), Score::NAN))
+            .collect())
+    }
+}
+
+pub struct FastTopSegment {
+    column: Option<Column<u64>>,
+    segment_ord: SegmentOrdinal,
+    desc: bool,
+    after: Option<u128>,
+    k: usize,
+    /// Buffer size that triggers pruning back to `k`.
+    cap: usize,
+    /// The worst kept entry once the buffer has been pruned; later documents must beat it.
+    threshold: u128,
+    buffer: Vec<u128>,
+}
+
+impl FastTopSegment {
+    #[inline]
+    fn push(&mut self, doc: DocId) {
+        let packed = match self.column.as_ref().and_then(|c| c.first(doc)) {
+            Some(v) => (u128::from(if self.desc { !v } else { v }) << 32) | u128::from(doc),
+            None => (1u128 << 96) | u128::from(doc),
+        };
+        if packed >= self.threshold || self.after.is_some_and(|b| packed <= b) {
+            return;
+        }
+        self.buffer.push(packed);
+        if self.buffer.len() >= self.cap {
+            self.prune();
+        }
+    }
+
+    fn prune(&mut self) {
+        let k = self.k;
+        self.buffer.select_nth_unstable(k - 1);
+        self.buffer.truncate(k);
+        self.threshold = self.buffer[k - 1];
+    }
+}
+
+impl SegmentCollector for FastTopSegment {
+    type Fruit = Vec<(u128, SegmentOrdinal)>;
+
+    fn collect(&mut self, doc: DocId, _score: Score) {
+        self.push(doc);
+    }
+
+    fn collect_block(&mut self, docs: &[DocId]) {
+        for &doc in docs {
+            self.push(doc);
+        }
+    }
+
+    fn harvest(mut self) -> Self::Fruit {
+        self.buffer.sort_unstable();
+        self.buffer.truncate(self.k);
+        let seg = self.segment_ord;
+        self.buffer.into_iter().map(|p| (p, seg)).collect()
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// SortedTop: any list of keys
 // ---------------------------------------------------------------------------------------------
 
 struct Cursor {
@@ -274,7 +513,7 @@ struct Cursor {
 /// Merged result: sort values (text/bytes resolved), address, score.
 pub type SortedFruit = Vec<(Vec<KeyValue>, DocAddress, Score)>;
 
-struct SortedTop {
+pub struct SortedTop {
     keys: Arc<[Key]>,
     cursor: Option<Cursor>,
     limit: usize,
@@ -332,7 +571,7 @@ enum CursorBound {
     Ord { ord: u64, exact: bool },
 }
 
-struct SortedTopSegment {
+pub struct SortedTopSegment {
     keys: Arc<[Key]>,
     readers: Vec<KeyReader>,
     segment_ord: SegmentOrdinal,

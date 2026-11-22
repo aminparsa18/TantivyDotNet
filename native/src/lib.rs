@@ -566,3 +566,32 @@ pub unsafe extern "C" fn tdn_reader_searcher(
 pub unsafe extern "C" fn tdn_reader_free(reader: *mut TdnReader) {
     ffi::free_box(reader);
 }
+
+/// Entry points for `examples/query_timing.rs`, which times the search path without .NET. Not part of
+/// the C ABI (csbindgen only reads `extern "C"` functions).
+#[doc(hidden)]
+pub mod timing {
+    use tantivy::query::Query;
+    use tantivy::{Index, Searcher};
+
+    /// Builds a query from our query JSON.
+    pub fn build_query(query_json: &str, index: &Index) -> Result<Box<dyn Query>, String> {
+        let spec = crate::query_spec::parse_spec(query_json).map_err(|e| e.message)?;
+        crate::query_spec::build(&spec, index).map_err(|e| e.message)
+    }
+
+    /// Builds a schema from our schema JSON (custom analyzers aren't supported here).
+    pub fn schema(schema_json: &str) -> Result<tantivy::schema::Schema, String> {
+        crate::schema_spec::schema_from_json(schema_json).map(|(s, _)| s).map_err(|e| e.message)
+    }
+
+    /// Parses a document exactly as `tdn_writer_add_json` does (unknown fields rejected).
+    pub fn parse_document(schema: &tantivy::schema::Schema, json: &str) -> Result<tantivy::TantivyDocument, String> {
+        crate::documents::parse(schema, json, false).map_err(|e| e.message)
+    }
+
+    /// Runs a search request exactly as `tdn_searcher_search` does and returns the result JSON.
+    pub fn search(searcher: &Searcher, index: &Index, request_json: &str) -> Result<String, String> {
+        crate::search::run(searcher, index, request_json).map_err(|e| e.message)
+    }
+}

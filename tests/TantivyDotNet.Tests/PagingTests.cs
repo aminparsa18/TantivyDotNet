@@ -55,8 +55,86 @@ public class PagingTests
             Assert.Equal(searcher.Count(query), page.TotalCount);   // the count ignores the cursor
             if (page.Count == 0) return ids;
             ids.AddRange(Ids(page));
+            // A cursor that doesn't advance would page forever; fail instead.
+            Assert.True(ids.Count <= page.TotalCount, $"Paging returned more than the {page.TotalCount} matches.");
             cursor = page[^1].Cursor;
         }
+    }
+
+    /// <summary>
+    /// Sorting by one numeric field (the native fast path) pages correctly for every numeric type in
+    /// both orders: negative values, ties, missing values last, cursors across segments, and a
+    /// segment with no value for the field at all.
+    /// </summary>
+    [Theory]
+    [InlineData("i", false)]
+    [InlineData("i", true)]
+    [InlineData("f", false)]
+    [InlineData("f", true)]
+    [InlineData("d", false)]
+    [InlineData("d", true)]
+    [InlineData("b", false)]
+    [InlineData("b", true)]
+    public void SingleNumericKey_PagesLikeLinqForEveryType(string field, bool descending)
+    {
+        var index = SearchIndex.CreateInRam(new SchemaBuilder()
+            .AddStringField("id", stored: true)
+            .AddI64Field("i", fast: true)
+            .AddF64Field("f", fast: true)
+            .AddDateField("d", fast: true)
+            .AddBoolField("b", fast: true)
+            .Build());
+        var values = new Dictionary<string, IComparable?>();
+        // One indexing thread and no merges: documents get addresses in insertion order.
+        using (var writer = index.CreateWriter(new IndexWriterOptions { ThreadCount = 1, MergePolicy = MergePolicy.None }))
+        {
+            for (int i = 0; i < 50; i++)
+            {
+                string id = $"r{i:D2}";
+                // Segment 3 (rows 30-39) has no numeric values at all; elsewhere every 7th row is missing.
+                bool missing = i is >= 30 and < 40 || i % 7 == 0;
+                long v = (i * 37 % 19) - 9;                                   // -9..9, with ties
+                IComparable? value = missing ? null : field switch
+                {
+                    "i" => v,
+                    "f" => v * 1.5,
+                    "d" => new DateTimeOffset(2020, 1, 1, 0, 0, 0, TimeSpan.Zero).AddDays(v),
+                    _ => v > 0,
+                };
+                values[id] = value;
+                string json = value switch
+                {
+                    null => $$"""{"id":"{{id}}"}""",
+                    DateTimeOffset d => $$"""{"id":"{{id}}","{{field}}":"{{d:yyyy-MM-ddTHH:mm:ssZ}}"}""",
+                    bool b => $$"""{"id":"{{id}}","{{field}}":{{(b ? "true" : "false")}}}""",
+                    double x => $$"""{"id":"{{id}}","{{field}}":{{x.ToString(System.Globalization.CultureInfo.InvariantCulture)}}}""",
+                    _ => $$"""{"id":"{{id}}","{{field}}":{{value}}}""",
+                };
+                writer.AddDocument(json);
+                if (i % 10 == 9) writer.Commit();
+            }
+        }
+        using var searcher = index.CreateSearcher();
+
+        // The full result: every document once, in value order, missing values last. (Ties are
+        // broken by document address, which follows the segment order Tantivy chooses.)
+        var order = new[] { SortBy.Field(field, descending) };
+        var all = Ids(searcher.Search(Query.All, new SearchOptions { Limit = 50, OrderBy = order }));
+        Assert.Equal(values.Keys.Order(), all.Order());
+        var sortedValues = all.Select(id => values[id!]).ToList();
+        int firstMissing = sortedValues.IndexOf(null);
+        Assert.Equal(values.Count(p => p.Value is null), sortedValues.Count - firstMissing);
+        Assert.All(sortedValues.Skip(firstMissing), Assert.Null);
+        var present = sortedValues.Take(firstMissing).ToList();
+        var expectedValues = descending ? present.OrderDescending().ToList() : present.Order().ToList();
+        Assert.Equal(expectedValues, present);
+
+        // Paging with cursors (several page sizes, so pages end inside runs of ties and at segment
+        // boundaries) and with offsets gives exactly the same order.
+        foreach (var pageSize in new[] { 1, 3, 7 })
+            Assert.Equal(all, PageThrough(searcher, Query.All, order, pageSize));
+        foreach (var offset in new[] { 5, 44 })
+            Assert.Equal(all.Skip(offset).Take(4), Ids(searcher.Search(Query.All, new SearchOptions { Limit = 4, Offset = offset, OrderBy = order })));
     }
 
     [Fact]

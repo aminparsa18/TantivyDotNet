@@ -5,7 +5,8 @@ edition = "2021"
 publish = false
 
 [lib]
-crate-type = ["cdylib"]
+# rlib too, so examples/ (the native timing harness) can call the search code directly.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }

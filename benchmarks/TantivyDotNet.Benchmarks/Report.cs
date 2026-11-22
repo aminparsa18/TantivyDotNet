@@ -134,16 +134,18 @@ public static class Report
         _ => $"{v.ToString("G3", CultureInfo.InvariantCulture)} {unit}",
     };
 
-    /// <summary>"2.0× faster" / "1.1× slower", or "4% larger" for sizes.</summary>
+    /// <summary>"2.0× faster" / "1.5× slower"; "4% slower" or "4% larger" for differences under 10% and for sizes.</summary>
     public static string FormatRatio(ReportRow row, string unit)
     {
         var ratio = row.Tantivy / row.Lucene;
-        if (unit == "MiB")
+        // Small differences read better as a percentage ("4% slower" rather than "1.0× slower").
+        var percent = Math.Abs(ratio - 1) * 100;
+        if (unit == "MiB" || percent < 10)
         {
-            var percent = Math.Abs(ratio - 1) * 100;
-            return percent < 0.5 ? "same size" : $"{percent.ToString("F0", CultureInfo.InvariantCulture)}% {(ratio < 1 ? "smaller" : "larger")}";
+            var (better, worse) = unit == "MiB" ? ("smaller", "larger") : ("faster", "slower");
+            return percent < 0.5 ? (unit == "MiB" ? "same size" : "same speed")
+                : $"{percent.ToString("F0", CultureInfo.InvariantCulture)}% {(ratio < 1 ? better : worse)}";
         }
-        if (Math.Abs(ratio - 1) < 0.05) return "about as fast";
         return ratio < 1
             ? $"{(1 / ratio).ToString("F1", CultureInfo.InvariantCulture)}× faster"
             : $"{ratio.ToString("F1", CultureInfo.InvariantCulture)}× slower";

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
@@ -96,19 +97,56 @@ public sealed unsafe class Searcher : IDisposable
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(options);
 
-        byte[] request = options.ToRequestJson(query);
-        byte[] resultJson;
-        using (var lease = _handle.Lease())
+        var request = RequestBuffer.Rent();
+        try
         {
-            TdnString result, err;
-            fixed (byte* rp = request)
+            options.WriteRequest(request.Writer, query);
+            JsonElement root;
+            using (var lease = _handle.Lease())
             {
-                Ffi.Check(NativeMethods.tdn_searcher_search(
-                    (TdnSearcher*)lease.Pointer, rp, (nuint)request.Length, &result, &err), err);
+                TdnString result, err;
+                fixed (byte* rp = request.Buffer.WrittenSpan)
+                {
+                    Ffi.Check(NativeMethods.tdn_searcher_search(
+                        (TdnSearcher*)lease.Pointer, rp, (nuint)request.Buffer.WrittenCount, &result, &err), err);
+                }
+                root = Ffi.TakeJson(result);
             }
-            resultJson = Ffi.TakeBytes(result);
+            return SearchResults.Parse(root, this, options);
         }
-        return SearchResults.Parse(resultJson, this, options);
+        finally
+        {
+            RequestBuffer.Return(request);
+        }
+    }
+
+    /// <summary>
+    /// A per-thread buffer and writer for search requests, so a search doesn't allocate them. A
+    /// buffer that grew past 64 KB (a huge query) is dropped rather than kept.
+    /// </summary>
+    private sealed class RequestBuffer
+    {
+        [ThreadStatic] private static RequestBuffer? t_cached;
+
+        public readonly ArrayBufferWriter<byte> Buffer = new(1024);
+        public readonly Utf8JsonWriter Writer;
+
+        private RequestBuffer() => Writer = new Utf8JsonWriter(Buffer);
+
+        public static RequestBuffer Rent()
+        {
+            var b = t_cached ?? new RequestBuffer();
+            t_cached = null;   // not reentrant: a nested search on this thread gets its own
+            return b;
+        }
+
+        public static void Return(RequestBuffer b)
+        {
+            if (b.Buffer.Capacity > 64 * 1024) return;
+            b.Buffer.ResetWrittenCount();
+            b.Writer.Reset(b.Buffer);
+            t_cached = b;
+        }
     }
 
     /// <summary>
@@ -247,12 +285,11 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     // Shape: {"count": n, "hits": [{"score": f, "addr": [s, d], "doc": {...}, "snippets"?: {...}}]} (see native/src/search.rs).
-    internal static SearchResults Parse(byte[] json, Searcher origin, SearchOptions options)
+    // `root` is self-contained (see Ffi.TakeJson), so hits keep elements of it without copying.
+    internal static SearchResults Parse(JsonElement root, Searcher origin, SearchOptions options)
     {
         string signature = options.OrderSignature;
         bool sorted = options.OrderBy is { Count: > 0 };
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
         var hitsJson = root.GetProperty("hits");
         var hits = new SearchHit[hitsJson.GetArrayLength()];
         int i = 0;
@@ -260,18 +297,20 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
         {
             var score = h.GetProperty("score");
             var addr = h.GetProperty("addr");
-            hits[i++] = new SearchHit(score.ValueKind == JsonValueKind.Null ? float.NaN : score.GetSingle(), new Document(h.GetProperty("doc").Clone()))
+            var sort = h.GetProperty("sort");
+            uint segmentOrd = addr[0].GetUInt32(), docId = addr[1].GetUInt32();
+            hits[i++] = new SearchHit(score.ValueKind == JsonValueKind.Null ? float.NaN : score.GetSingle(), new Document(h.GetProperty("doc")))
             {
                 Origin = origin,
-                SegmentOrd = addr[0].GetUInt32(),
-                DocId = addr[1].GetUInt32(),
+                SegmentOrd = segmentOrd,
+                DocId = docId,
                 Snippets = h.TryGetProperty("snippets", out var sn) ? ParseSnippets(sn) : SearchHit.NoSnippets,
-                SortValues = sorted ? [.. h.GetProperty("sort").EnumerateArray().Select(ParseSortValue)] : SearchHit.NoSortValues,
-                CursorData = new HitCursor(signature, h.GetProperty("sort").GetRawText(), addr[0].GetUInt32(), addr[1].GetUInt32()),
+                SortValues = sorted ? ParseSortValues(sort) : SearchHit.NoSortValues,
+                CursorData = new HitCursor(signature, sort, segmentOrd, docId),
             };
         }
         var facets = root.TryGetProperty("facets", out var fj) ? ParseFacets(fj) : NoFacets;
-        JsonElement? aggregations = root.TryGetProperty("aggregations", out var aj) ? aj.Clone() : null;
+        JsonElement? aggregations = root.TryGetProperty("aggregations", out var aj) ? aj : null;
         return new SearchResults(hits, root.GetProperty("count").GetInt64(), facets, aggregations);
     }
 
@@ -288,6 +327,14 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
             map[field.Name] = counts;
         }
         return map;
+    }
+
+    private static object?[] ParseSortValues(JsonElement sort)
+    {
+        var values = new object?[sort.GetArrayLength()];
+        int i = 0;
+        foreach (var v in sort.EnumerateArray()) values[i++] = ParseSortValue(v);
+        return values;
     }
 
     // Tagged like query values: {"u64": 5}, {"date": micros}, {"score": f}, ... or null (see native/src/sorting.rs).

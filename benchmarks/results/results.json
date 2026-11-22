@@ -13,14 +13,14 @@
         {
           "label": "1 thread",
           "detail": null,
-          "lucene": 15.3,
-          "tantivy": 7.03
+          "lucene": 15,
+          "tantivy": 7.31
         },
         {
           "label": "4 threads",
           "detail": null,
-          "lucene": 10,
-          "tantivy": 3.62
+          "lucene": 9.56,
+          "tantivy": 3.73
         }
       ]
     },
@@ -31,42 +31,42 @@
         {
           "label": "Term",
           "detail": "science",
-          "lucene": 384,
-          "tantivy": 130,
+          "lucene": 377,
+          "tantivy": 81.7,
           "luceneAllocatedBytes": 63408,
-          "tantivyAllocatedBytes": 27200
+          "tantivyAllocatedBytes": 17552
         },
         {
           "label": "AND",
           "detail": "american AND football",
-          "lucene": 745,
-          "tantivy": 139,
+          "lucene": 718,
+          "tantivy": 121,
           "luceneAllocatedBytes": 158000,
-          "tantivyAllocatedBytes": 18816
+          "tantivyAllocatedBytes": 13288
         },
         {
           "label": "OR",
           "detail": "american OR football",
-          "lucene": 1296,
-          "tantivy": 417,
+          "lucene": 1204,
+          "tantivy": 304,
           "luceneAllocatedBytes": 597152,
-          "tantivyAllocatedBytes": 18824
+          "tantivyAllocatedBytes": 13256
         },
         {
           "label": "Phrase",
           "detail": "\"united states\"",
-          "lucene": 3703,
-          "tantivy": 4369,
+          "lucene": 3657,
+          "tantivy": 3786,
           "luceneAllocatedBytes": 278336,
-          "tantivyAllocatedBytes": 22032
+          "tantivyAllocatedBytes": 14968
         },
         {
           "label": "Term, sorted",
           "detail": "science, by a numeric field",
-          "lucene": 1713,
-          "tantivy": 379,
+          "lucene": 1511,
+          "tantivy": 224,
           "luceneAllocatedBytes": 145096,
-          "tantivyAllocatedBytes": 70568
+          "tantivyAllocatedBytes": 38568
         }
       ]
     },

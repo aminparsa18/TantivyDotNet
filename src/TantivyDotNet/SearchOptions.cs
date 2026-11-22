@@ -178,10 +178,9 @@ public sealed class SearchOptions
 
     // Shape: {"query": {...}, "limit": n, "offset": n, "sort"?: [...], "search_after"?: {...}, "fields"?: [...], "snippets"?: {...}, "facets"?: [...],
     // "aggregations"?: {...}} (see native/src/search.rs).
-    internal byte[] ToRequestJson(Query query)
+    /// <summary>Writes the request JSON to <paramref name="w"/> (and flushes it).</summary>
+    internal void WriteRequest(Utf8JsonWriter w, Query query)
     {
-        var buffer = new ArrayBufferWriter<byte>();
-        using (var w = new Utf8JsonWriter(buffer))
         {
             w.WriteStartObject();
             w.WritePropertyName("query");
@@ -203,7 +202,7 @@ public sealed class SearchOptions
                         $"SearchAfter is a cursor for order '{cursor.OrderSignature}', but this search orders by '{OrderSignature}'.");
                 w.WriteStartObject("search_after");
                 w.WritePropertyName("keys");
-                w.WriteRawValue(cursor.SortKeysJson, skipInputValidation: true);   // validated by Decode
+                cursor.SortKeys.WriteTo(w);
                 w.WriteStartArray("addr");
                 w.WriteNumberValue(cursor.SegmentOrd);
                 w.WriteNumberValue(cursor.DocId);
@@ -234,7 +233,7 @@ public sealed class SearchOptions
             }
             w.WriteEndObject();
         }
-        return buffer.WrittenSpan.ToArray();
+        w.Flush();
     }
 }
 
@@ -301,7 +300,11 @@ public sealed class SortBy
 /// <summary>
 /// The opaque <see cref="SearchHit.Cursor"/>: base64url of <c>{"o": order signature, "k": [tagged sort values], "a": [segment, doc]}</c>.
 /// </summary>
-internal readonly record struct HitCursor(string OrderSignature, string SortKeysJson, uint SegmentOrd, uint DocId)
+/// <remarks>
+/// <see cref="SortKeys"/> is the hit's <c>sort</c> array as returned by native code; it is only
+/// serialized when <see cref="SearchHit.Cursor"/> is read.
+/// </remarks>
+internal readonly record struct HitCursor(string OrderSignature, JsonElement SortKeys, uint SegmentOrd, uint DocId)
 {
     public string Encode()
     {
@@ -311,7 +314,7 @@ internal readonly record struct HitCursor(string OrderSignature, string SortKeys
             w.WriteStartObject();
             w.WriteString("o", OrderSignature);
             w.WritePropertyName("k");
-            w.WriteRawValue(SortKeysJson, skipInputValidation: true);
+            SortKeys.WriteTo(w);
             w.WriteStartArray("a");
             w.WriteNumberValue(SegmentOrd);
             w.WriteNumberValue(DocId);
@@ -327,12 +330,12 @@ internal readonly record struct HitCursor(string OrderSignature, string SortKeys
         {
             string b64 = cursor.Replace('-', '+').Replace('_', '/');
             b64 = b64.PadRight(b64.Length + (4 - b64.Length % 4) % 4, '=');
-            using var doc = JsonDocument.Parse(Convert.FromBase64String(b64));
-            var root = doc.RootElement;
+            var reader = new Utf8JsonReader(Convert.FromBase64String(b64));
+            var root = JsonElement.ParseValue(ref reader);   // self-contained, nothing to dispose
             var keys = root.GetProperty("k");
             if (keys.ValueKind != JsonValueKind.Array) throw new FormatException();
             var addr = root.GetProperty("a");
-            return new HitCursor(root.GetProperty("o").GetString()!, keys.GetRawText(), addr[0].GetUInt32(), addr[1].GetUInt32());
+            return new HitCursor(root.GetProperty("o").GetString()!, keys, addr[0].GetUInt32(), addr[1].GetUInt32());
         }
         catch (Exception e) when (e is FormatException or JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException)
         {
