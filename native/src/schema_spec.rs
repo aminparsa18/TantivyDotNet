@@ -3,8 +3,10 @@
 //! option layout changes.
 //!
 //! ```json
-//! [{"name":"title","type":"text","stored":true,"indexed":true,"fast":false,"tokenizer":"default"}]
+//! {"fields": [{"name":"title","type":"text","stored":true,"indexed":true,"fast":false,"tokenizer":"default"}],
+//!  "analyzers": {"name": {...}}}
 //! ```
+//! (`analyzers` is optional; see `analyzers`).
 
 use serde::{Deserialize, Serialize};
 use tantivy::schema::{
@@ -12,7 +14,15 @@ use tantivy::schema::{
     TextFieldIndexing, TextOptions,
 };
 
+use crate::analyzers::{self, Analyzers};
 use crate::ffi::{FfiError, FfiResult};
+
+#[derive(Serialize, Deserialize)]
+struct SchemaSpec {
+    fields: Vec<FieldSpec>,
+    #[serde(default)]
+    analyzers: Analyzers,
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct FieldSpec {
@@ -33,15 +43,22 @@ fn default_true() -> bool {
     true
 }
 
-pub fn schema_from_json(json: &str) -> FfiResult<Schema> {
-    let specs: Vec<FieldSpec> = serde_json::from_str(json)
+/// Parses schema JSON into a Tantivy schema and the custom analyzers its text fields may use.
+pub fn schema_from_json(json: &str) -> FfiResult<(Schema, Analyzers)> {
+    let spec: SchemaSpec = serde_json::from_str(json)
         .map_err(|e| FfiError::invalid(format!("invalid schema JSON: {e}")))?;
+    let specs = &spec.fields;
+    let used = specs
+        .iter()
+        .filter(|f| f.kind == "text" && f.indexed)
+        .map(|f| (f.name.as_str(), f.tokenizer.as_deref().unwrap_or("default")));
+    analyzers::validate(&spec.analyzers, used)?;
     if specs.is_empty() {
         return Err(FfiError::invalid("schema has no fields"));
     }
     let mut builder = Schema::builder();
-    for spec in &specs {
-        if is_duplicate(&specs, &spec.name) {
+    for spec in specs {
+        if is_duplicate(specs, &spec.name) {
             return Err(FfiError::invalid(format!("duplicate field name '{}'", spec.name)));
         }
         let name = spec.name.as_str();
@@ -117,7 +134,7 @@ pub fn schema_from_json(json: &str) -> FfiResult<Schema> {
             }
         }
     }
-    Ok(builder.build())
+    Ok((builder.build(), spec.analyzers))
 }
 
 /// True if `name` appears more than once in `specs` (checked once per field, so O(n^2) on
@@ -140,8 +157,8 @@ fn numeric(spec: &FieldSpec) -> NumericOptions {
     opts
 }
 
-pub fn schema_to_json(schema: &Schema) -> String {
-    let specs: Vec<FieldSpec> = schema
+pub fn schema_to_json(schema: &Schema, analyzers: &Analyzers) -> String {
+    let fields: Vec<FieldSpec> = schema
         .fields()
         .map(|(_, entry)| {
             let ft = entry.field_type();
@@ -171,5 +188,6 @@ pub fn schema_to_json(schema: &Schema) -> String {
             }
         })
         .collect();
-    serde_json::to_string(&specs).expect("schema spec serialization cannot fail")
+    serde_json::to_string(&SchemaSpec { fields, analyzers: analyzers.clone() })
+        .expect("schema spec serialization cannot fail")
 }

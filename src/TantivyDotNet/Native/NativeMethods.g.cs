@@ -35,12 +35,13 @@ namespace TantivyDotNet.Native
 
         /// <summary>
         ///  Creates a new index in an existing directory. Fails if the directory already holds an index.
+        ///  Custom analyzers are saved next to it (`analyzers::ANALYZERS_FILE`).
         /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_index_create_in_dir", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int tdn_index_create_in_dir(byte* path_ptr, nuint path_len, byte* schema_ptr, nuint schema_len, TdnIndex** @out, TdnString* err);
 
         /// <summary>
-        ///  Opens an existing index directory.
+        ///  Opens an existing index directory, registering the custom analyzers saved with it.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_index_open_in_dir", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int tdn_index_open_in_dir(byte* path_ptr, nuint path_len, TdnIndex** @out, TdnString* err);
@@ -50,6 +51,13 @@ namespace TantivyDotNet.Native
         /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_index_schema", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int tdn_index_schema(TdnIndex* index, TdnString* @out, TdnString* err);
+
+        /// <summary>
+        ///  Runs `text` through the index's tokenizer `name` (built-in or custom) and returns the token
+        ///  texts as a JSON array of strings.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_index_analyze", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_index_analyze(TdnIndex* index, byte* name_ptr, nuint name_len, byte* text_ptr, nuint text_len, TdnString* @out, TdnString* err);
 
         [DllImport(__DllName, EntryPoint = "tdn_index_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void tdn_index_free(TdnIndex* index);

@@ -58,7 +58,7 @@ public sealed unsafe class SearchIndex : IDisposable
         return new SearchIndex(index);
     }
 
-    /// <summary>Opens an existing index directory.</summary>
+    /// <summary>Opens an existing index directory. Custom analyzers saved with the index are restored.</summary>
     /// <exception cref="TantivyException">The directory doesn't exist or doesn't contain an index.</exception>
     public static SearchIndex Open(string directory)
     {
@@ -113,6 +113,31 @@ public sealed unsafe class SearchIndex : IDisposable
         TdnString err;
         Ffi.Check(NativeMethods.tdn_index_searcher((TdnIndex*)lease.Pointer, &searcher, &err), err);
         return new Searcher(new SearcherHandle(searcher), Schema);
+    }
+
+    /// <summary>
+    /// Runs <paramref name="text"/> through a tokenizer of this index and returns the resulting
+    /// terms, to check what a field indexes or how query text is analyzed.
+    /// </summary>
+    /// <param name="tokenizer">A built-in tokenizer or a custom analyzer of the schema (see <see cref="Schema.Analyzers"/>).</param>
+    /// <param name="text">The text to analyze.</param>
+    /// <exception cref="TantivyException">With <see cref="TantivyErrorCode.InvalidArgument"/> if there is no such tokenizer.</exception>
+    public IReadOnlyList<string> Analyze(string tokenizer, string text)
+    {
+        ArgumentNullException.ThrowIfNull(tokenizer);
+        ArgumentNullException.ThrowIfNull(text);
+        byte[] n = Ffi.Utf8(tokenizer), t = Ffi.Utf8(text);
+        string json;
+        using (var lease = _handle.Lease())
+        {
+            TdnString result, err;
+            fixed (byte* np = n)
+            fixed (byte* tp = t)
+                Ffi.Check(NativeMethods.tdn_index_analyze((TdnIndex*)lease.Pointer, np, (nuint)n.Length, tp, (nuint)t.Length, &result, &err), err);
+            json = Ffi.TakeString(result);
+        }
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        return [.. doc.RootElement.EnumerateArray().Select(e => e.GetString()!)];
     }
 
     /// <summary>Releases the native index. Safe to call more than once.</summary>

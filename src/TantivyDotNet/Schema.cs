@@ -47,14 +47,24 @@ public sealed class Schema
 {
     private readonly Dictionary<string, FieldDefinition> _byName;
 
-    internal Schema(IReadOnlyList<FieldDefinition> fields)
+    /// <summary>Tokenizers every index has; custom analyzers can't use these names.</summary>
+    internal static readonly string[] BuiltInTokenizers = ["default", "raw", "en_stem", "whitespace"];
+
+    internal Schema(IReadOnlyList<FieldDefinition> fields, IReadOnlyDictionary<string, Analyzer> analyzers)
     {
         Fields = fields;
+        Analyzers = analyzers;
         _byName = fields.ToDictionary(f => f.Name, StringComparer.Ordinal);
     }
 
     /// <summary>The fields, in declaration order.</summary>
     public IReadOnlyList<FieldDefinition> Fields { get; }
+
+    /// <summary>
+    /// The custom analyzers added with <see cref="SchemaBuilder.AddAnalyzer"/>, by name. Built-in
+    /// tokenizers (<c>default</c>, <c>raw</c>, <c>en_stem</c>, <c>whitespace</c>) aren't listed.
+    /// </summary>
+    public IReadOnlyDictionary<string, Analyzer> Analyzers { get; }
 
     /// <summary>Returns the field with this name (case-sensitive).</summary>
     /// <exception cref="KeyNotFoundException">No such field.</exception>
@@ -64,14 +74,16 @@ public sealed class Schema
     /// <summary>Looks up a field by name (case-sensitive).</summary>
     public bool TryGetField(string name, [MaybeNullWhen(false)] out FieldDefinition field) => _byName.TryGetValue(name, out field);
 
-    // The JSON shape is defined in native/src/schema_spec.rs.
+    // The JSON shape is defined in native/src/schema_spec.rs:
+    // {"fields": [{"name", "type", "stored", "indexed", "fast", "tokenizer"?}], "analyzers": {"name": {...}}}
 
     internal byte[] ToJsonUtf8()
     {
         using var buffer = new MemoryStream();
         using (var w = new Utf8JsonWriter(buffer))
         {
-            w.WriteStartArray();
+            w.WriteStartObject();
+            w.WriteStartArray("fields");
             foreach (var f in Fields)
             {
                 w.WriteStartObject();
@@ -84,6 +96,14 @@ public sealed class Schema
                 w.WriteEndObject();
             }
             w.WriteEndArray();
+            w.WriteStartObject("analyzers");
+            foreach (var (name, analyzer) in Analyzers)
+            {
+                w.WritePropertyName(name);
+                analyzer.WriteJson(w);
+            }
+            w.WriteEndObject();
+            w.WriteEndObject();
         }
         return buffer.ToArray();
     }
@@ -92,7 +112,7 @@ public sealed class Schema
     {
         using var doc = JsonDocument.Parse(json);
         var fields = new List<FieldDefinition>();
-        foreach (var e in doc.RootElement.EnumerateArray())
+        foreach (var e in doc.RootElement.GetProperty("fields").EnumerateArray())
         {
             fields.Add(new FieldDefinition(
                 e.GetProperty("name").GetString()!,
@@ -102,7 +122,10 @@ public sealed class Schema
                 e.GetProperty("fast").GetBoolean(),
                 e.TryGetProperty("tokenizer", out var t) ? t.GetString() : null));
         }
-        return new Schema(fields);
+        var analyzers = new Dictionary<string, Analyzer>(StringComparer.Ordinal);
+        if (doc.RootElement.TryGetProperty("analyzers", out var a))
+            foreach (var p in a.EnumerateObject()) analyzers[p.Name] = Analyzer.FromJson(p.Value);
+        return new Schema(fields, analyzers.AsReadOnly());
     }
 
     private static string TypeToJson(FieldType type) => type switch
@@ -149,6 +172,29 @@ public sealed class Schema
 public sealed class SchemaBuilder
 {
     private readonly List<FieldDefinition> _fields = [];
+    private readonly Dictionary<string, Analyzer> _analyzers = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Registers a custom <paramref name="analyzer"/> under <paramref name="name"/>, for use as the
+    /// <c>tokenizer</c> of text fields. The definition is part of the schema: an index created in a
+    /// directory saves it, and <see cref="SearchIndex.Open"/> restores it.
+    /// </summary>
+    /// <param name="name">The name text fields refer to. Can't be a built-in tokenizer name (<c>default</c>, <c>raw</c>, <c>en_stem</c>, <c>whitespace</c>).</param>
+    /// <param name="analyzer">The analyzer; see <see cref="Analyzer"/>.</param>
+    /// <remarks>
+    /// Changing an analyzer later would make existing documents and new queries disagree on terms,
+    /// so an index's analyzers can't be changed after creation; reindex into a new index instead.
+    /// </remarks>
+    public SchemaBuilder AddAnalyzer(string name, Analyzer analyzer)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(name);
+        ArgumentNullException.ThrowIfNull(analyzer);
+        if (Array.IndexOf(Schema.BuiltInTokenizers, name) >= 0)
+            throw new ArgumentException($"'{name}' is a built-in tokenizer and can't be redefined.", nameof(name));
+        if (!_analyzers.TryAdd(name, analyzer))
+            throw new ArgumentException($"An analyzer named '{name}' was already added.", nameof(name));
+        return this;
+    }
 
     /// <summary>
     /// Adds a full-text field. Its values are split into terms by <paramref name="tokenizer"/>
@@ -158,7 +204,7 @@ public sealed class SchemaBuilder
     /// <param name="name">Field name.</param>
     /// <param name="stored">Return the original value in search hits.</param>
     /// <param name="fast">Also store as a fast field (untokenized), for sorting and aggregations.</param>
-    /// <param name="tokenizer">Tokenizer name registered in Tantivy.</param>
+    /// <param name="tokenizer">A built-in tokenizer (<c>default</c>, <c>raw</c>, <c>en_stem</c>, <c>whitespace</c>) or the name of an analyzer added with <see cref="AddAnalyzer"/>.</param>
     public SchemaBuilder AddTextField(string name, bool stored = false, bool fast = false, string tokenizer = "default")
     {
         ArgumentException.ThrowIfNullOrEmpty(tokenizer);
@@ -222,11 +268,18 @@ public sealed class SchemaBuilder
         Add(new FieldDefinition(name, FieldType.Facet, stored, Indexed: true, Fast: true, null));
 
     /// <summary>Creates the schema. The builder can keep being used afterwards.</summary>
-    /// <exception cref="InvalidOperationException">No fields were added.</exception>
-    public Schema Build() =>
-        _fields.Count == 0
-            ? throw new InvalidOperationException("A schema needs at least one field.")
-            : new Schema(_fields.ToArray());
+    /// <exception cref="InvalidOperationException">No fields were added, or a text field uses a tokenizer that is neither built in nor added with <see cref="AddAnalyzer"/>.</exception>
+    public Schema Build()
+    {
+        if (_fields.Count == 0) throw new InvalidOperationException("A schema needs at least one field.");
+        foreach (var f in _fields)
+        {
+            if (f.Tokenizer is { } t && Array.IndexOf(Schema.BuiltInTokenizers, t) < 0 && !_analyzers.ContainsKey(t))
+                throw new InvalidOperationException(
+                    $"Field '{f.Name}' uses tokenizer '{t}', which is neither built in ({string.Join(", ", Schema.BuiltInTokenizers)}) nor added with AddAnalyzer.");
+        }
+        return new Schema(_fields.ToArray(), new Dictionary<string, Analyzer>(_analyzers, StringComparer.Ordinal).AsReadOnly());
+    }
 
     private SchemaBuilder Add(FieldDefinition field)
     {

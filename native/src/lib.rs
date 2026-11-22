@@ -16,6 +16,7 @@
 #![allow(clippy::missing_safety_doc)] // covered once by the crate-level section above
 
 mod aggregations;
+mod analyzers;
 mod documents;
 mod facets;
 mod ffi;
@@ -63,6 +64,7 @@ impl TdnString {
 pub struct TdnIndex {
     index: Index,
     reader: IndexReader,
+    analyzers: analyzers::Analyzers,
 }
 
 /// `IndexWriter::commit`/`rollback` take `&mut self`. The mutex makes concurrent calls from .NET
@@ -81,11 +83,12 @@ pub struct TdnSearcher {
 }
 
 impl TdnIndex {
-    fn new(index: Index) -> FfiResult<Self> {
+    fn new(index: Index, analyzers: analyzers::Analyzers) -> FfiResult<Self> {
+        analyzers::register(index.tokenizers(), &analyzers)?;
         // Manual reload: tdn_index_searcher reloads explicitly, so every new searcher sees the
         // latest commit, and no file-watcher thread is started.
         let reader = index.reader_builder().reload_policy(ReloadPolicy::Manual).try_into()?;
-        Ok(Self { index, reader })
+        Ok(Self { index, reader, analyzers })
     }
 }
 
@@ -131,13 +134,14 @@ pub unsafe extern "C" fn tdn_index_create_in_ram(
     err: *mut TdnString,
 ) -> i32 {
     guard(err, || {
-        let schema = schema_spec::schema_from_json(str_arg(schema_ptr, schema_len, "schema")?)?;
-        let index = TdnIndex::new(Index::create_in_ram(schema))?;
+        let (schema, analyzers) = schema_spec::schema_from_json(str_arg(schema_ptr, schema_len, "schema")?)?;
+        let index = TdnIndex::new(Index::create_in_ram(schema), analyzers)?;
         write_out(out, Box::into_raw(Box::new(index)), "index")
     })
 }
 
 /// Creates a new index in an existing directory. Fails if the directory already holds an index.
+/// Custom analyzers are saved next to it (`analyzers::ANALYZERS_FILE`).
 #[no_mangle]
 pub unsafe extern "C" fn tdn_index_create_in_dir(
     path_ptr: *const u8,
@@ -149,13 +153,17 @@ pub unsafe extern "C" fn tdn_index_create_in_dir(
 ) -> i32 {
     guard(err, || {
         let path = str_arg(path_ptr, path_len, "path")?;
-        let schema = schema_spec::schema_from_json(str_arg(schema_ptr, schema_len, "schema")?)?;
-        let index = TdnIndex::new(Index::create_in_dir(path, schema)?)?;
+        let (schema, analyzers) = schema_spec::schema_from_json(str_arg(schema_ptr, schema_len, "schema")?)?;
+        let created = Index::create_in_dir(path, schema)?;
+        if !analyzers.is_empty() {
+            analyzers::save(std::path::Path::new(path), &analyzers)?;
+        }
+        let index = TdnIndex::new(created, analyzers)?;
         write_out(out, Box::into_raw(Box::new(index)), "index")
     })
 }
 
-/// Opens an existing index directory.
+/// Opens an existing index directory, registering the custom analyzers saved with it.
 #[no_mangle]
 pub unsafe extern "C" fn tdn_index_open_in_dir(
     path_ptr: *const u8,
@@ -165,7 +173,9 @@ pub unsafe extern "C" fn tdn_index_open_in_dir(
 ) -> i32 {
     guard(err, || {
         let path = str_arg(path_ptr, path_len, "path")?;
-        let index = TdnIndex::new(Index::open_in_dir(path)?)?;
+        let opened = Index::open_in_dir(path)?;
+        let analyzers = analyzers::load(std::path::Path::new(path))?;
+        let index = TdnIndex::new(opened, analyzers)?;
         write_out(out, Box::into_raw(Box::new(index)), "index")
     })
 }
@@ -179,8 +189,30 @@ pub unsafe extern "C" fn tdn_index_schema(
 ) -> i32 {
     guard(err, || {
         let index = handle(index, "index")?;
-        let json = schema_spec::schema_to_json(&index.index.schema());
+        let json = schema_spec::schema_to_json(&index.index.schema(), &index.analyzers);
         write_out(out, TdnString::from_string(json), "schema")
+    })
+}
+
+/// Runs `text` through the index's tokenizer `name` (built-in or custom) and returns the token
+/// texts as a JSON array of strings.
+#[no_mangle]
+pub unsafe extern "C" fn tdn_index_analyze(
+    index: *const TdnIndex,
+    name_ptr: *const u8,
+    name_len: usize,
+    text_ptr: *const u8,
+    text_len: usize,
+    out: *mut TdnString,
+    err: *mut TdnString,
+) -> i32 {
+    guard(err, || {
+        let index = handle(index, "index")?;
+        let name = str_arg(name_ptr, name_len, "tokenizer name")?;
+        let text = str_arg(text_ptr, text_len, "text")?;
+        let tokens = analyzers::analyze(&index.index, name, text)?;
+        let json = serde_json::to_string(&tokens).expect("string list serialization cannot fail");
+        write_out(out, TdnString::from_string(json), "tokens")
     })
 }
 
