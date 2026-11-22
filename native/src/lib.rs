@@ -16,6 +16,7 @@
 #![allow(clippy::missing_safety_doc)] // covered once by the crate-level section above
 
 mod aggregations;
+mod documents;
 mod facets;
 mod ffi;
 mod query_spec;
@@ -29,7 +30,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tantivy::aggregation::agg_result::AggregationResults;
 use tantivy::collector::{Count, MultiCollector};
-use tantivy::schema::{Field, FieldType, NamedFieldDocument, Schema};
+use tantivy::schema::{NamedFieldDocument, Schema};
 use tantivy::{
     Document, Index, IndexReader, IndexWriter, ReloadPolicy, Searcher, TantivyDocument, Term,
 };
@@ -41,7 +42,7 @@ use sorting::SortRequest;
 use ffi::{guard, handle, str_arg, write_out, FfiError, FfiResult};
 
 /// Bumped whenever the exported C ABI changes; the managed side checks it on load.
-pub const ABI_VERSION: u32 = 3;
+pub const ABI_VERSION: u32 = 4;
 
 /// A Rust-owned UTF-8 buffer handed to the caller. Release with `tdn_string_free`.
 #[repr(C)]
@@ -69,7 +70,9 @@ pub struct TdnIndex {
 /// not thread-safe.
 pub struct TdnWriter {
     writer: Mutex<IndexWriter>,
+    index: Index,
     schema: Schema,
+    ignore_unknown_fields: bool,
 }
 
 pub struct TdnSearcher {
@@ -93,9 +96,12 @@ impl TdnWriter {
             .map_err(|_| FfiError::new(ffi::status::ERROR, "writer is unusable after an earlier panic"))
     }
 
-    fn field(&self, name: &str) -> FfiResult<(Field, &FieldType)> {
-        let field = self.schema.get_field(name)?;
-        Ok((field, self.schema.get_field_entry(field).field_type()))
+    fn parse_doc(&self, json: &str) -> FfiResult<TantivyDocument> {
+        documents::parse(&self.schema, json, self.ignore_unknown_fields)
+    }
+
+    fn term(&self, term_json: &str) -> FfiResult<Term> {
+        query_spec::term_of(&query_spec::parse_spec(term_json)?, &self.schema)
     }
 }
 
@@ -187,13 +193,18 @@ pub unsafe extern "C" fn tdn_index_free(index: *mut TdnIndex) {
 // Writer
 // ---------------------------------------------------------------------------------------------
 
+/// Writer option flags for `tdn_index_writer`.
+pub const WRITER_IGNORE_UNKNOWN_FIELDS: u32 = 1;
+
 /// Creates the index's writer. `num_threads == 0` lets Tantivy choose (up to 8, at least 15 MB
-/// of heap per thread). Only one writer may exist per index at a time.
+/// of heap per thread). `flags` is a combination of `WRITER_*` bits. Only one writer may exist
+/// per index at a time.
 #[no_mangle]
 pub unsafe extern "C" fn tdn_index_writer(
     index: *const TdnIndex,
     heap_bytes: usize,
     num_threads: usize,
+    flags: u32,
     out: *mut *mut TdnWriter,
     err: *mut TdnString,
 ) -> i32 {
@@ -204,7 +215,12 @@ pub unsafe extern "C" fn tdn_index_writer(
         } else {
             index.writer_with_num_threads(num_threads, heap_bytes)?
         };
-        let writer = TdnWriter { writer: Mutex::new(writer), schema: index.schema() };
+        let writer = TdnWriter {
+            writer: Mutex::new(writer),
+            index: index.clone(),
+            schema: index.schema(),
+            ignore_unknown_fields: flags & WRITER_IGNORE_UNKNOWN_FIELDS != 0,
+        };
         write_out(out, Box::into_raw(Box::new(writer)), "writer")
     })
 }
@@ -219,78 +235,69 @@ pub unsafe extern "C" fn tdn_writer_add_json(
 ) -> i32 {
     guard(err, || {
         let writer = handle(writer, "writer")?;
-        let json = str_arg(json_ptr, json_len, "document")?;
-        let doc = TantivyDocument::parse_json(&writer.schema, json)
-            .map_err(|e| FfiError::invalid(format!("invalid document: {e}")))?;
+        let doc = writer.parse_doc(str_arg(json_ptr, json_len, "document")?)?;
         writer.lock()?.add_document(doc)?;
         Ok(())
     })
 }
 
-/// Deletes every document whose text field contains exactly this term. The value is not run
-/// through the field's tokenizer.
+/// Deletes every document containing the term of a term-query JSON
+/// (`{"type":"term","field":...,"value":{...}}`, see `query_spec`), then adds the document.
+/// Both happen under one lock, so they land in the same commit; the delete doesn't affect the
+/// new document.
 #[no_mangle]
-pub unsafe extern "C" fn tdn_writer_delete_text(
+pub unsafe extern "C" fn tdn_writer_update_json(
     writer: *const TdnWriter,
-    field_ptr: *const u8,
-    field_len: usize,
-    value_ptr: *const u8,
-    value_len: usize,
+    term_ptr: *const u8,
+    term_len: usize,
+    json_ptr: *const u8,
+    json_len: usize,
     err: *mut TdnString,
 ) -> i32 {
     guard(err, || {
         let writer = handle(writer, "writer")?;
-        let name = str_arg(field_ptr, field_len, "field")?;
-        let value = str_arg(value_ptr, value_len, "value")?;
-        let (field, ty) = writer.field(name)?;
-        expect_type(name, matches!(ty, FieldType::Str(_)), "text")?;
-        writer.lock()?.delete_term(Term::from_field_text(field, value));
+        let term = writer.term(str_arg(term_ptr, term_len, "term")?)?;
+        let doc = writer.parse_doc(str_arg(json_ptr, json_len, "document")?)?;
+        let w = writer.lock()?;
+        w.delete_term(term);
+        w.add_document(doc)?;
         Ok(())
     })
 }
 
+/// Deletes every document containing the term of a term-query JSON (see `tdn_writer_update_json`).
+/// The value is not run through the field's tokenizer.
 #[no_mangle]
-pub unsafe extern "C" fn tdn_writer_delete_u64(
+pub unsafe extern "C" fn tdn_writer_delete_term(
     writer: *const TdnWriter,
-    field_ptr: *const u8,
-    field_len: usize,
-    value: u64,
+    term_ptr: *const u8,
+    term_len: usize,
     err: *mut TdnString,
 ) -> i32 {
     guard(err, || {
         let writer = handle(writer, "writer")?;
-        let name = str_arg(field_ptr, field_len, "field")?;
-        let (field, ty) = writer.field(name)?;
-        expect_type(name, matches!(ty, FieldType::U64(_)), "u64")?;
-        writer.lock()?.delete_term(Term::from_field_u64(field, value));
+        let term = writer.term(str_arg(term_ptr, term_len, "term")?)?;
+        writer.lock()?.delete_term(term);
         Ok(())
     })
 }
 
+/// Deletes every document matching a query JSON (see `query_spec`), as of this point in the
+/// operation order.
 #[no_mangle]
-pub unsafe extern "C" fn tdn_writer_delete_i64(
+pub unsafe extern "C" fn tdn_writer_delete_query(
     writer: *const TdnWriter,
-    field_ptr: *const u8,
-    field_len: usize,
-    value: i64,
+    query_ptr: *const u8,
+    query_len: usize,
     err: *mut TdnString,
 ) -> i32 {
     guard(err, || {
         let writer = handle(writer, "writer")?;
-        let name = str_arg(field_ptr, field_len, "field")?;
-        let (field, ty) = writer.field(name)?;
-        expect_type(name, matches!(ty, FieldType::I64(_)), "i64")?;
-        writer.lock()?.delete_term(Term::from_field_i64(field, value));
+        let spec = query_spec::parse_spec(str_arg(query_ptr, query_len, "query")?)?;
+        let query = query_spec::build(&spec, &writer.index)?;
+        writer.lock()?.delete_query(query)?;
         Ok(())
     })
-}
-
-fn expect_type(name: &str, ok: bool, expected: &str) -> FfiResult<()> {
-    if ok {
-        Ok(())
-    } else {
-        Err(FfiError::invalid(format!("field '{name}' is not a {expected} field")))
-    }
 }
 
 #[no_mangle]

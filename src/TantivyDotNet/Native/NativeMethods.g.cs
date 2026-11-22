@@ -56,10 +56,11 @@ namespace TantivyDotNet.Native
 
         /// <summary>
         ///  Creates the index's writer. `num_threads == 0` lets Tantivy choose (up to 8, at least 15 MB
-        ///  of heap per thread). Only one writer may exist per index at a time.
+        ///  of heap per thread). `flags` is a combination of `WRITER_*` bits. Only one writer may exist
+        ///  per index at a time.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_index_writer", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int tdn_index_writer(TdnIndex* index, nuint heap_bytes, nuint num_threads, TdnWriter** @out, TdnString* err);
+        internal static extern int tdn_index_writer(TdnIndex* index, nuint heap_bytes, nuint num_threads, uint flags, TdnWriter** @out, TdnString* err);
 
         /// <summary>
         ///  Adds one document given as a JSON object (field name -&gt; value or array of values).
@@ -68,17 +69,27 @@ namespace TantivyDotNet.Native
         internal static extern int tdn_writer_add_json(TdnWriter* writer, byte* json_ptr, nuint json_len, TdnString* err);
 
         /// <summary>
-        ///  Deletes every document whose text field contains exactly this term. The value is not run
-        ///  through the field's tokenizer.
+        ///  Deletes every document containing the term of a term-query JSON
+        ///  (`{"type":"term","field":...,"value":{...}}`, see `query_spec`), then adds the document.
+        ///  Both happen under one lock, so they land in the same commit; the delete doesn't affect the
+        ///  new document.
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "tdn_writer_delete_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int tdn_writer_delete_text(TdnWriter* writer, byte* field_ptr, nuint field_len, byte* value_ptr, nuint value_len, TdnString* err);
+        [DllImport(__DllName, EntryPoint = "tdn_writer_update_json", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_writer_update_json(TdnWriter* writer, byte* term_ptr, nuint term_len, byte* json_ptr, nuint json_len, TdnString* err);
 
-        [DllImport(__DllName, EntryPoint = "tdn_writer_delete_u64", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int tdn_writer_delete_u64(TdnWriter* writer, byte* field_ptr, nuint field_len, ulong value, TdnString* err);
+        /// <summary>
+        ///  Deletes every document containing the term of a term-query JSON (see `tdn_writer_update_json`).
+        ///  The value is not run through the field's tokenizer.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_writer_delete_term", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_writer_delete_term(TdnWriter* writer, byte* term_ptr, nuint term_len, TdnString* err);
 
-        [DllImport(__DllName, EntryPoint = "tdn_writer_delete_i64", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int tdn_writer_delete_i64(TdnWriter* writer, byte* field_ptr, nuint field_len, long value, TdnString* err);
+        /// <summary>
+        ///  Deletes every document matching a query JSON (see `query_spec`), as of this point in the
+        ///  operation order.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_writer_delete_query", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_writer_delete_query(TdnWriter* writer, byte* query_ptr, nuint query_len, TdnString* err);
 
         [DllImport(__DllName, EntryPoint = "tdn_writer_delete_all", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int tdn_writer_delete_all(TdnWriter* writer, TdnString* err);

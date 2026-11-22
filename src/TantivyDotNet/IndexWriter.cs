@@ -30,9 +30,10 @@ public sealed unsafe class IndexWriter : IDisposable
 
     /// <summary>
     /// Adds a document given as a JSON object mapping field names to a value or an array of
-    /// values, for example <c>{"title": "Of Mice and Men", "year": 1937}</c>. Unknown fields are ignored.
+    /// values, for example <c>{"title": "Of Mice and Men", "year": 1937}</c>. A property that isn't a
+    /// schema field is an error unless the writer was created with <see cref="IndexWriterOptions.IgnoreUnknownFields"/>.
     /// </summary>
-    /// <exception cref="TantivyException">With <see cref="TantivyErrorCode.InvalidArgument"/> if the JSON is invalid or a value doesn't match its field type.</exception>
+    /// <exception cref="TantivyException">With <see cref="TantivyErrorCode.InvalidArgument"/> if the JSON is invalid, a value doesn't match its field type, or a field is unknown.</exception>
     public void AddDocument(string json)
     {
         ArgumentNullException.ThrowIfNull(json);
@@ -78,38 +79,74 @@ public sealed unsafe class IndexWriter : IDisposable
     /// tokenizer, pass a single lowercase word. To delete by ID, use a field added with
     /// <see cref="SchemaBuilder.AddStringField"/>.
     /// </summary>
-    public void DeleteTerm(string field, string value)
-    {
-        ArgumentNullException.ThrowIfNull(field);
-        ArgumentNullException.ThrowIfNull(value);
-        byte[] f = Ffi.Utf8(field), v = Ffi.Utf8(value);
-        using var lease = _handle.Lease();
-        TdnString err;
-        fixed (byte* fp = f)
-        fixed (byte* vp = v)
-            Ffi.Check(NativeMethods.tdn_writer_delete_text(Ptr(lease), fp, (nuint)f.Length, vp, (nuint)v.Length, &err), err);
-    }
+    public void DeleteTerm(string field, string value) => DeleteTerm(Query.Term(field, value));
 
     /// <summary>Deletes every document whose indexed u64 field <paramref name="field"/> equals <paramref name="value"/>.</summary>
-    public void DeleteTerm(string field, ulong value)
-    {
-        ArgumentNullException.ThrowIfNull(field);
-        byte[] f = Ffi.Utf8(field);
-        using var lease = _handle.Lease();
-        TdnString err;
-        fixed (byte* fp = f)
-            Ffi.Check(NativeMethods.tdn_writer_delete_u64(Ptr(lease), fp, (nuint)f.Length, value, &err), err);
-    }
+    public void DeleteTerm(string field, ulong value) => DeleteTerm(Query.Term(field, value));
 
     /// <summary>Deletes every document whose indexed i64 field <paramref name="field"/> equals <paramref name="value"/>.</summary>
-    public void DeleteTerm(string field, long value)
+    public void DeleteTerm(string field, long value) => DeleteTerm(Query.Term(field, value));
+
+    /// <summary>
+    /// Deletes every document matching <paramref name="query"/>, among those added before this call
+    /// (documents added later aren't affected). Takes effect on <see cref="Commit"/>.
+    /// </summary>
+    /// <example><c>writer.DeleteDocuments(Query.Range("year", null, 1900L));</c></example>
+    /// <exception cref="TantivyException">The query doesn't fit the schema (see <see cref="Searcher.Search(Query, SearchOptions)"/>).</exception>
+    public void DeleteDocuments(Query query)
     {
-        ArgumentNullException.ThrowIfNull(field);
-        byte[] f = Ffi.Utf8(field);
+        ArgumentNullException.ThrowIfNull(query);
+        byte[] q = query.ToJson();
         using var lease = _handle.Lease();
         TdnString err;
-        fixed (byte* fp = f)
-            Ffi.Check(NativeMethods.tdn_writer_delete_i64(Ptr(lease), fp, (nuint)f.Length, value, &err), err);
+        fixed (byte* qp = q)
+            Ffi.Check(NativeMethods.tdn_writer_delete_query(Ptr(lease), qp, (nuint)q.Length, &err), err);
+    }
+
+    /// <summary>
+    /// Replaces the documents containing <paramref name="term"/> with a new document given as JSON:
+    /// deletes them and adds <paramref name="json"/> in one operation, so a commit includes both or
+    /// neither. Typically <paramref name="term"/> is an ID: <c>Query.Term("id", "b42")</c>.
+    /// </summary>
+    /// <param name="term">An exact term of an indexed field. It isn't analyzed (see <see cref="Query.Term(string, string)"/>).</param>
+    /// <param name="json">The new document; see <see cref="AddDocument(string)"/>.</param>
+    /// <exception cref="TantivyException">With <see cref="TantivyErrorCode.InvalidArgument"/> if the term doesn't fit the schema or the document is invalid. Nothing is deleted then.</exception>
+    public void UpdateDocument(TermQuery term, string json)
+    {
+        ArgumentNullException.ThrowIfNull(json);
+        UpdateDocumentUtf8(term, Ffi.Utf8(json));
+    }
+
+    /// <inheritdoc cref="UpdateDocument(TermQuery, string)"/>
+    /// <param name="term">An exact term of an indexed field.</param>
+    /// <param name="utf8Json">The new document as UTF-8 JSON.</param>
+    public void UpdateDocument(TermQuery term, ReadOnlySpan<byte> utf8Json) => UpdateDocumentUtf8(term, utf8Json);
+
+    /// <inheritdoc cref="UpdateDocument(TermQuery, string)"/>
+    /// <param name="term">An exact term of an indexed field.</param>
+    /// <param name="document">The new document, serialized as in <see cref="AddDocument{T}(T, JsonTypeInfo{T})"/>.</param>
+    /// <param name="typeInfo">Source-generated metadata for <typeparamref name="T"/>.</param>
+    public void UpdateDocument<T>(TermQuery term, T document, JsonTypeInfo<T> typeInfo)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        UpdateDocumentUtf8(term, JsonSerializer.SerializeToUtf8Bytes(document, typeInfo));
+    }
+
+    /// <inheritdoc cref="UpdateDocument(TermQuery, string)"/>
+    /// <param name="term">An exact term of an indexed field.</param>
+    /// <param name="document">The new document, serialized as in <see cref="AddDocument(object)"/>.</param>
+    [RequiresUnreferencedCode("Reflection-based JSON serialization. Use UpdateDocument<T>(TermQuery, T, JsonTypeInfo<T>) for trimmed apps.")]
+    [RequiresDynamicCode("Reflection-based JSON serialization. Use UpdateDocument<T>(TermQuery, T, JsonTypeInfo<T>) for NativeAOT apps.")]
+    public void UpdateDocument(TermQuery term, object document)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        if (document is string json)
+        {
+            UpdateDocument(term, json);
+            return;
+        }
+        UpdateDocumentUtf8(term, JsonSerializer.SerializeToUtf8Bytes(document, document.GetType()));
     }
 
     /// <summary>Deletes all documents (takes effect on <see cref="Commit"/>).</summary>
@@ -137,6 +174,26 @@ public sealed unsafe class IndexWriter : IDisposable
         TdnString err;
         fixed (byte* p = json)
             Ffi.Check(NativeMethods.tdn_writer_add_json(Ptr(lease), p, (nuint)json.Length, &err), err);
+    }
+
+    private void DeleteTerm(TermQuery term)
+    {
+        byte[] t = term.ToJson();
+        using var lease = _handle.Lease();
+        TdnString err;
+        fixed (byte* tp = t)
+            Ffi.Check(NativeMethods.tdn_writer_delete_term(Ptr(lease), tp, (nuint)t.Length, &err), err);
+    }
+
+    private void UpdateDocumentUtf8(TermQuery term, ReadOnlySpan<byte> json)
+    {
+        ArgumentNullException.ThrowIfNull(term);
+        byte[] t = term.ToJson();
+        using var lease = _handle.Lease();
+        TdnString err;
+        fixed (byte* tp = t)
+        fixed (byte* jp = json)
+            Ffi.Check(NativeMethods.tdn_writer_update_json(Ptr(lease), tp, (nuint)t.Length, jp, (nuint)json.Length, &err), err);
     }
 
     private void Run(delegate*<TdnWriter*, TdnString*, int> op)

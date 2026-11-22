@@ -4,7 +4,7 @@ using TantivyDotNet.Native;
 namespace TantivyDotNet;
 
 /// <summary>
-/// A Tantivy index, in memory or in a directory. Create documents with <see cref="CreateWriter"/>
+/// A Tantivy index, in memory or in a directory. Create documents with <see cref="CreateWriter(IndexWriterOptions)"/>
 /// and query them with <see cref="CreateSearcher"/>.
 /// </summary>
 /// <remarks>
@@ -82,14 +82,22 @@ public sealed unsafe class SearchIndex : IDisposable
     /// </param>
     /// <param name="threadCount">Number of indexing threads, or null to let Tantivy choose (at most 8).</param>
     /// <exception cref="TantivyException">With <see cref="TantivyErrorCode.LockBusy"/> if another writer is open.</exception>
-    public IndexWriter CreateWriter(long heapBytes = 50_000_000, int? threadCount = null)
+    public IndexWriter CreateWriter(long heapBytes = 50_000_000, int? threadCount = null) =>
+        CreateWriter(new IndexWriterOptions { HeapBytes = heapBytes, ThreadCount = threadCount });
+
+    /// <summary>
+    /// Creates the index's writer with <paramref name="options"/>. Only one writer can exist per
+    /// index at a time; dispose the previous one first.
+    /// </summary>
+    /// <exception cref="TantivyException">With <see cref="TantivyErrorCode.LockBusy"/> if another writer is open.</exception>
+    public IndexWriter CreateWriter(IndexWriterOptions options)
     {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(heapBytes);
-        if (threadCount is { } t) ArgumentOutOfRangeException.ThrowIfNegativeOrZero(t, nameof(threadCount));
+        ArgumentNullException.ThrowIfNull(options);
+        uint flags = options.IgnoreUnknownFields ? Ffi.WriterIgnoreUnknownFields : 0;
         using var lease = _handle.Lease();
         TdnWriter* writer;
         TdnString err;
-        Ffi.Check(NativeMethods.tdn_index_writer((TdnIndex*)lease.Pointer, (nuint)heapBytes, (nuint)(threadCount ?? 0), &writer, &err), err);
+        Ffi.Check(NativeMethods.tdn_index_writer((TdnIndex*)lease.Pointer, (nuint)options.HeapBytes, (nuint)(options.ThreadCount ?? 0), flags, &writer, &err), err);
         return new IndexWriter(new WriterHandle(writer));
     }
 

@@ -210,6 +210,21 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
     })
 }
 
+/// The term of a `{"type":"term",...}` spec, for the writer's delete/update-by-term operations.
+pub fn term_of(spec: &QuerySpec, schema: &Schema) -> FfiResult<Term> {
+    match spec {
+        QuerySpec::Term { field, value } => {
+            let (f, ft) = indexed_field(schema, field)?;
+            make_term(f, field, ft, value)
+        }
+        _ => Err(FfiError::invalid("expected a term query")),
+    }
+}
+
+pub fn parse_spec(json: &str) -> FfiResult<QuerySpec> {
+    serde_json::from_str(json).map_err(|e| FfiError::invalid(format!("invalid query JSON: {e}")))
+}
+
 pub fn all_indexed_text_fields(schema: &Schema) -> Vec<Field> {
     schema
         .fields()
