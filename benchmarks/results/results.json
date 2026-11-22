@@ -1,0 +1,86 @@
+{
+  "date": "2026-11-22",
+  "machine": "Intel Core i5-1038NG7 CPU 2.00GHz",
+  "os": "macOS Tahoe 26.5.2 (25F84)",
+  "runtime": ".NET 10.0.0",
+  "benchmarkDotNet": "0.15.8",
+  "corpus": "215,778 English Wikipedia articles",
+  "sections": [
+    {
+      "title": "Indexing all articles (on disk, commit, close)",
+      "unit": "s",
+      "rows": [
+        {
+          "label": "1 thread",
+          "detail": null,
+          "lucene": 15.3,
+          "tantivy": 7.03
+        },
+        {
+          "label": "4 threads",
+          "detail": null,
+          "lucene": 10,
+          "tantivy": 3.62
+        }
+      ]
+    },
+    {
+      "title": "Query: top 10 hits with stored fields, plus total count",
+      "unit": "µs",
+      "rows": [
+        {
+          "label": "Term",
+          "detail": "science",
+          "lucene": 384,
+          "tantivy": 130,
+          "luceneAllocatedBytes": 63408,
+          "tantivyAllocatedBytes": 27200
+        },
+        {
+          "label": "AND",
+          "detail": "american AND football",
+          "lucene": 745,
+          "tantivy": 139,
+          "luceneAllocatedBytes": 158000,
+          "tantivyAllocatedBytes": 18816
+        },
+        {
+          "label": "OR",
+          "detail": "american OR football",
+          "lucene": 1296,
+          "tantivy": 417,
+          "luceneAllocatedBytes": 597152,
+          "tantivyAllocatedBytes": 18824
+        },
+        {
+          "label": "Phrase",
+          "detail": "\"united states\"",
+          "lucene": 3703,
+          "tantivy": 4369,
+          "luceneAllocatedBytes": 278336,
+          "tantivyAllocatedBytes": 22032
+        },
+        {
+          "label": "Term, sorted",
+          "detail": "science, by a numeric field",
+          "lucene": 1713,
+          "tantivy": 379,
+          "luceneAllocatedBytes": 145096,
+          "tantivyAllocatedBytes": 70568
+        }
+      ]
+    },
+    {
+      "title": "Index size",
+      "unit": "MiB",
+      "rows": [
+        {
+          "label": "On disk",
+          "detail": "171 MiB of text",
+          "lucene": 185.5,
+          "tantivy": 192.4
+        }
+      ]
+    }
+  ]
+}

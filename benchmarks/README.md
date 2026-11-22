@@ -26,4 +26,15 @@ dotnet run -c Release --project benchmarks/TantivyDotNet.Benchmarks -- compare  
 - `QueryBenchmarks` and `size` share one index per engine, built once under `artifacts/bench/shared` and rebuilt when the corpus file changes. Each query benchmark first checks that both engines return the same number of matches and prints a warning if they don't. Small differences come from the tokenizers (see the main README).
 - `compare` lists the articles only one engine matches, for each query.
 
+## Publishing results
+
+BenchmarkDotNet writes its reports, including a JSON export, to `artifacts/BenchmarkDotNet/results`. To update the published results and the chart in the main README after a full run:
+
+```sh
+dotnet run -c Release --project benchmarks/TantivyDotNet.Benchmarks -- export   # results.json + summary.svg
+dotnet run -c Release --project benchmarks/TantivyDotNet.Benchmarks -- chart    # redraw summary.svg from results.json only
+```
+
+`export` reads the newest JSON report of each benchmark class, measures the shared indexes' size, and writes [results/results.json](results/results.json) and [results/summary.svg](results/summary.svg). The chart draws each measurement relative to Lucene.NET, with the absolute values at the bar ends. It's a self-contained SVG with a light and a dark variant (chosen by the viewer's color scheme). The README links it by absolute URL because the README is also the NuGet package's readme, so a changed chart shows up on nuget.org only after it's pushed to `main`.
+
 Close other applications first. Indexing is CPU- and disk-bound, and the 4-thread runs use most of a laptop.

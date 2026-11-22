@@ -177,27 +177,12 @@ Some behavior to know about:
 
 Compared with [Lucene.NET](https://lucenenet.apache.org/) 4.8.0-beta00018 on 215,778 English Wikipedia articles: title plus lead section, 171 MiB of text. Both engines index the same fields (id, title and body stored, plus a numeric column for sorting) and give each writer the same 256 MB indexing buffer. Neither uses stemming or stop words.
 
-| Indexing all articles (on disk, commit, close) | Lucene.NET | TantivyDotNet |
-| --- | ---: | ---: |
-| 1 thread | 15.1 s | **7.4 s** (2.0× faster) |
-| 4 threads | 10.0 s | **3.7 s** (2.7× faster) |
+![Benchmark results: TantivyDotNet indexes 2-3× faster than Lucene.NET and answers term, AND, OR and sorted queries 3-5× faster; phrase queries are about 1.2× slower, and the index is 4% larger.](https://raw.githubusercontent.com/aminparsa18/TantivyDotNet/main/benchmarks/results/summary.svg)
 
-| Query: top 10 hits with stored fields, plus total count | Lucene.NET | TantivyDotNet |
-| --- | ---: | ---: |
-| Term (`science`, 5.9k matches) | 380 µs | **116 µs** (3.3× faster) |
-| AND (`american` AND `football`) | 744 µs | **125 µs** (6.0× faster) |
-| OR (`american` OR `football`, 30k matches) | 1,231 µs | **399 µs** (3.1× faster) |
-| Phrase (`"united states"`, 49k matches) | **3,695 µs** | 4,035 µs (1.1× slower) |
-| Term, sorted by a numeric field | 1,640 µs | **263 µs** (6.2× faster) |
-
-| Index size | Lucene.NET | TantivyDotNet |
-| --- | ---: | ---: |
-| On disk | **185.5 MiB** (109% of the text) | 192.4 MiB (113%) |
-
-Measured with BenchmarkDotNet 0.15.8 on .NET 10, macOS 26, Intel Core i5-1038NG7 (4 cores / 8 threads), from an SSD. Some notes on what this measures:
+Measured with BenchmarkDotNet 0.15.8 on .NET 10, macOS 26, Intel Core i5-1038NG7 (4 cores / 8 threads), from an SSD. The exact figures are in [benchmarks/results/results.json](benchmarks/results/results.json). Some notes on what this measures:
 
 - **Indexing** starts from articles already in memory as .NET objects, so building each engine's documents is included: serializing to JSON for TantivyDotNet, filling reused `Field` objects for Lucene. With N threads, Tantivy gets N indexing threads fed from one caller thread, while Lucene gets N threads calling `AddDocument`. Closing the writer waits for background merges in both engines.
-- **Queries** run single-threaded against an open searcher, using queries built in code. TantivyDotNet's figure includes the cost of crossing the native boundary (the request and results travel as JSON). Allocation figures (24 KB vs 62 KB per term query, for example) count managed memory only; Tantivy's native allocations aren't included.
+- **Queries** run single-threaded against an open searcher, using queries built in code. TantivyDotNet's figure includes the cost of crossing the native boundary (the request and results travel as JSON). Allocation figures (27 KB vs 62 KB per term query, for example) count managed memory only; Tantivy's native allocations aren't included.
 - **Match counts** differ slightly because the tokenizers differ. Lucene keeps `science's` and `States.The` as single tokens; Tantivy's default tokenizer splits them at the punctuation. Tantivy's matches are a superset of Lucene's in every query: 1 extra for each term query, 22 extra for the phrase.
 - Phrase queries are the one case where Lucene is a little faster here.
 
