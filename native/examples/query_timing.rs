@@ -4,7 +4,7 @@
 //! - `tantivy`:      Count + top 10 with Tantivy's own collectors (no stored fields)
 //! - `tantivy+docs`: the same, plus loading each hit's stored document
 //! - `2-pass`:       Count and top 10 as two separate searches (each takes its own fast path:
-//!                   `Weight::count`, and Block-WAND for the top hits)
+//!   `Weight::count`, and Block-WAND for the top hits)
 //! - `multi`:        Count + top 10 in a `MultiCollector` (one pass, dynamic dispatch)
 //! - `docs->json`:   loading the 10 documents and writing them as named-field JSON (alone)
 //! - `ours`:         our whole native search (`search::run`): request JSON in, result JSON out
@@ -100,18 +100,22 @@ fn main() {
             black_box((count.extract(&mut fruits), top.extract(&mut fruits)));
         });
         let t_json = time(|| {
-            let docs: Vec<_> = addrs
-                .iter()
-                .map(|&a| searcher.doc::<TantivyDocument>(a).unwrap().to_named_doc(&schema))
-                .collect();
+            let docs: Vec<_> =
+                addrs.iter().map(|&a| searcher.doc::<TantivyDocument>(a).unwrap().to_named_doc(&schema)).collect();
             black_box(serde_json::to_string(&docs).unwrap());
         });
         // Our documents must be exactly Tantivy's NamedFieldDocument JSON.
         let result: serde_json::Value = serde_json::from_str(&ours()).unwrap();
         for hit in result["hits"].as_array().unwrap() {
-            let addr = tantivy::DocAddress::new(hit["addr"][0].as_u64().unwrap() as u32, hit["addr"][1].as_u64().unwrap() as u32);
+            let addr = tantivy::DocAddress::new(
+                hit["addr"][0].as_u64().unwrap() as u32,
+                hit["addr"][1].as_u64().unwrap() as u32,
+            );
             let named = searcher.doc::<TantivyDocument>(addr).unwrap().to_named_doc(&schema);
-            assert_eq!(serde_json::to_string(&hit["doc"]).unwrap(), serde_json::to_string(&serde_json::to_value(named).unwrap()).unwrap());
+            assert_eq!(
+                serde_json::to_string(&hit["doc"]).unwrap(),
+                serde_json::to_string(&serde_json::to_value(named).unwrap()).unwrap()
+            );
         }
         let t_core = time(|| top(false));
         let t_docs = time(|| top(true));

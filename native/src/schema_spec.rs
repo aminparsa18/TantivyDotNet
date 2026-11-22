@@ -45,8 +45,8 @@ fn default_true() -> bool {
 
 /// Parses schema JSON into a Tantivy schema and the custom analyzers its text fields may use.
 pub fn schema_from_json(json: &str) -> FfiResult<(Schema, Analyzers)> {
-    let spec: SchemaSpec = serde_json::from_str(json)
-        .map_err(|e| FfiError::invalid(format!("invalid schema JSON: {e}")))?;
+    let spec: SchemaSpec =
+        serde_json::from_str(json).map_err(|e| FfiError::invalid(format!("invalid schema JSON: {e}")))?;
     let specs = &spec.fields;
     let used = specs
         .iter()
@@ -62,6 +62,10 @@ pub fn schema_from_json(json: &str) -> FfiResult<(Schema, Analyzers)> {
             return Err(FfiError::invalid(format!("duplicate field name '{}'", spec.name)));
         }
         let name = spec.name.as_str();
+        // Tantivy asserts on these (a panic), so check first.
+        if !tantivy::schema::is_valid_field_name(name) {
+            return Err(FfiError::invalid(format!("invalid field name '{name}': it can't be empty or start with '-'")));
+        }
         match spec.kind.as_str() {
             "text" => {
                 let mut opts = TextOptions::default();
@@ -158,11 +162,7 @@ pub fn schema_from_json(json: &str) -> FfiResult<(Schema, Analyzers)> {
                 }
                 builder.add_bytes_field(name, opts);
             }
-            other => {
-                return Err(FfiError::invalid(format!(
-                    "field '{name}': unsupported field type '{other}'"
-                )))
-            }
+            other => return Err(FfiError::invalid(format!("field '{name}': unsupported field type '{other}'"))),
         }
     }
     Ok((builder.build(), spec.analyzers))
@@ -194,10 +194,7 @@ pub fn schema_to_json(schema: &Schema, analyzers: &Analyzers) -> String {
         .map(|(_, entry)| {
             let ft = entry.field_type();
             let (kind, tokenizer) = match ft {
-                FieldType::Str(opts) => (
-                    "text",
-                    opts.get_indexing_options().map(|i| i.tokenizer().to_owned()),
-                ),
+                FieldType::Str(opts) => ("text", opts.get_indexing_options().map(|i| i.tokenizer().to_owned())),
                 FieldType::U64(_) => ("u64", None),
                 FieldType::I64(_) | FieldType::TieBreaker => ("i64", None),
                 FieldType::F64(_) => ("f64", None),
@@ -205,10 +202,9 @@ pub fn schema_to_json(schema: &Schema, analyzers: &Analyzers) -> String {
                 FieldType::Date(_) => ("date", None),
                 FieldType::Facet(_) => ("facet", None),
                 FieldType::Bytes(_) => ("bytes", None),
-                FieldType::JsonObject(opts) => (
-                    "json",
-                    opts.get_text_indexing_options().map(|i| i.tokenizer().to_owned()),
-                ),
+                FieldType::JsonObject(opts) => {
+                    ("json", opts.get_text_indexing_options().map(|i| i.tokenizer().to_owned()))
+                }
                 FieldType::IpAddr(_) => ("ip", None),
                 FieldType::Custom(_) => ("custom", None),
             };
@@ -224,4 +220,109 @@ pub fn schema_to_json(schema: &Schema, analyzers: &Analyzers) -> String {
         .collect();
     serde_json::to_string(&SchemaSpec { fields, analyzers: analyzers.clone() })
         .expect("schema spec serialization cannot fail")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ffi::status;
+    use serde_json::{json, Value};
+
+    fn round_trip(json: &str) -> Value {
+        let (schema, analyzers) = schema_from_json(json).unwrap_or_else(|e| panic!("{json}: {}", e.message));
+        serde_json::from_str(&schema_to_json(&schema, &analyzers)).unwrap()
+    }
+
+    fn error(json: &str) -> String {
+        match schema_from_json(json) {
+            Ok(_) => panic!("{json} was accepted"),
+            Err(e) => {
+                assert_eq!(e.code, status::INVALID_ARGUMENT, "{}", e.message);
+                e.message
+            }
+        }
+    }
+
+    #[test]
+    fn every_field_type_round_trips() {
+        let input = json!({"fields": [
+            {"name": "title", "type": "text", "stored": true, "indexed": true, "fast": false, "tokenizer": "en_stem"},
+            {"name": "id", "type": "text", "stored": true, "indexed": true, "fast": true, "tokenizer": "raw"},
+            {"name": "u", "type": "u64", "stored": true, "indexed": true, "fast": true},
+            {"name": "i", "type": "i64", "stored": false, "indexed": true, "fast": false},
+            {"name": "f", "type": "f64", "stored": true, "indexed": false, "fast": true},
+            {"name": "b", "type": "bool", "stored": true, "indexed": true, "fast": false},
+            {"name": "d", "type": "date", "stored": true, "indexed": true, "fast": true},
+            {"name": "c", "type": "facet", "stored": true, "indexed": true, "fast": true},
+            {"name": "j", "type": "json", "stored": true, "indexed": true, "fast": false, "tokenizer": "default"},
+            {"name": "ip", "type": "ip", "stored": true, "indexed": false, "fast": true},
+            {"name": "y", "type": "bytes", "stored": true, "indexed": true, "fast": false},
+        ]});
+        let output = round_trip(&input.to_string());
+        assert_eq!(output["fields"], input["fields"]);
+        // And the output is valid input describing the same schema.
+        assert_eq!(round_trip(&output.to_string()), output);
+    }
+
+    #[test]
+    fn defaults_are_indexed_not_stored_not_fast() {
+        let out = round_trip(r#"{"fields":[{"name":"t","type":"text"},{"name":"n","type":"u64"}]}"#);
+        assert_eq!(
+            out["fields"],
+            json!([
+                {"name": "t", "type": "text", "stored": false, "indexed": true, "fast": false, "tokenizer": "default"},
+                {"name": "n", "type": "u64", "stored": false, "indexed": true, "fast": false},
+            ])
+        );
+    }
+
+    #[test]
+    fn unindexed_text_has_no_tokenizer() {
+        let out =
+            round_trip(r#"{"fields":[{"name":"t","type":"text","stored":true,"indexed":false,"tokenizer":"raw"}]}"#);
+        assert_eq!(
+            out["fields"][0],
+            json!({"name": "t", "type": "text", "stored": true, "indexed": false, "fast": false})
+        );
+    }
+
+    #[test]
+    fn facets_are_always_indexed_and_fast() {
+        let out = round_trip(r#"{"fields":[{"name":"c","type":"facet","indexed":false,"fast":false}]}"#);
+        assert_eq!(out["fields"][0]["indexed"], true);
+        assert_eq!(out["fields"][0]["fast"], true);
+    }
+
+    #[test]
+    fn custom_analyzers_round_trip() {
+        let input = json!({
+            "fields": [{"name": "t", "type": "text", "stored": false, "indexed": true, "fast": false, "tokenizer": "folded"}],
+            "analyzers": {"folded": {"tokenizer": {"type": "simple"}, "filters": [{"type": "lowercase"}, {"type": "ascii_folding"}]}},
+        });
+        assert_eq!(round_trip(&input.to_string()), input);
+    }
+
+    #[test]
+    fn invalid_schemas_are_rejected() {
+        assert!(error("").contains("invalid schema JSON"));
+        assert!(error("[]").contains("invalid schema JSON"));
+        assert!(error(r#"{"fields":[]}"#).contains("no fields"));
+        assert!(error(r#"{"fields":[{"name":"a","type":"u64"},{"name":"a","type":"text"}]}"#).contains("duplicate"));
+        assert!(error(r#"{"fields":[{"name":"a","type":"u32"}]}"#).contains("unsupported field type 'u32'"));
+        assert!(error(r#"{"fields":[{"type":"u64"}]}"#).contains("missing field `name`"));
+        assert!(error(r#"{"fields":[{"name":"a","type":"u64","stored":"yes"}]}"#).contains("invalid type"));
+        assert!(error(r#"{"fields":[{"name":"t","type":"text","tokenizer":"nope"}]}"#).contains("nope"));
+    }
+
+    #[test]
+    fn field_names_tantivy_rejects_are_errors_not_panics() {
+        // Tantivy asserts on these in its schema builder.
+        for name in ["", "-a"] {
+            let json = json!({"fields": [{"name": name, "type": "u64"}]}).to_string();
+            assert!(error(&json).contains("invalid field name"), "{name:?}");
+        }
+        for name in ["a-b", "$a", "シャボン玉", "a b"] {
+            round_trip(&json!({"fields": [{"name": name, "type": "u64"}]}).to_string());
+        }
+    }
 }

@@ -3,7 +3,7 @@
 //!
 //! - `parse only`: our document parsing (`documents::parse`) of every line, nothing indexed
 //! - `index`:      parse + `add_document` per line, commit, wait for merges (what .NET does per call,
-//!                 minus serializing the article to JSON and the FFI call)
+//!   minus serializing the article to JSON and the FFI call)
 //!
 //! ```sh
 //! cargo run --release --example index_timing -- ../artifacts/corpus/wiki-abstracts.jsonl 1 4

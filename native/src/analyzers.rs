@@ -14,9 +14,8 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use tantivy::tokenizer::{
-    AsciiFoldingFilter, Language, LowerCaser, NgramTokenizer, RawTokenizer, RegexTokenizer,
-    RemoveLongFilter, SimpleTokenizer, Stemmer, StopWordFilter, TextAnalyzer, TextAnalyzerBuilder,
-    TokenizerManager, WhitespaceTokenizer,
+    AsciiFoldingFilter, Language, LowerCaser, NgramTokenizer, RawTokenizer, RegexTokenizer, RemoveLongFilter,
+    SimpleTokenizer, Stemmer, StopWordFilter, TextAnalyzer, TextAnalyzerBuilder, TokenizerManager, WhitespaceTokenizer,
 };
 use tantivy::Index;
 
@@ -44,8 +43,15 @@ enum TokenizerSpec {
     Simple,
     Whitespace,
     Raw,
-    Ngram { min_gram: usize, max_gram: usize, #[serde(default)] prefix_only: bool },
-    Regex { pattern: String },
+    Ngram {
+        min_gram: usize,
+        max_gram: usize,
+        #[serde(default)]
+        prefix_only: bool,
+    },
+    Regex {
+        pattern: String,
+    },
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -59,8 +65,12 @@ enum FilterSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         words: Option<Vec<String>>,
     },
-    Stemmer { language: String },
-    RemoveLong { limit: usize },
+    Stemmer {
+        language: String,
+    },
+    RemoveLong {
+        limit: usize,
+    },
 }
 
 /// The on-disk file: versioned so a later release can extend it.
@@ -122,8 +132,9 @@ pub fn load(dir: &Path) -> FfiResult<Analyzers> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Analyzers::new()),
         Err(e) => return Err(FfiError::new(status::IO, format!("reading {ANALYZERS_FILE}: {e}"))),
     };
-    let file: AnalyzersFile = serde_json::from_slice(&bytes)
-        .map_err(|e| FfiError::new(status::ERROR, format!("{} is corrupt or from a newer version: {e}", path.display())))?;
+    let file: AnalyzersFile = serde_json::from_slice(&bytes).map_err(|e| {
+        FfiError::new(status::ERROR, format!("{} is corrupt or from a newer version: {e}", path.display()))
+    })?;
     if file.version != 1 {
         return Err(FfiError::new(
             status::ERROR,
@@ -135,10 +146,8 @@ pub fn load(dir: &Path) -> FfiResult<Analyzers> {
 
 /// Runs `text` through the index's tokenizer `name` and returns the token texts.
 pub fn analyze(index: &Index, name: &str, text: &str) -> FfiResult<Vec<String>> {
-    let mut analyzer = index
-        .tokenizers()
-        .get(name)
-        .ok_or_else(|| FfiError::invalid(format!("no tokenizer named '{name}'")))?;
+    let mut analyzer =
+        index.tokenizers().get(name).ok_or_else(|| FfiError::invalid(format!("no tokenizer named '{name}'")))?;
     let mut stream = analyzer.token_stream(text);
     let mut tokens = Vec::new();
     while stream.advance() {
@@ -173,9 +182,8 @@ fn build(spec: &AnalyzerSpec) -> FfiResult<TextAnalyzer> {
             FilterSpec::AsciiFolding => builder.filter_dynamic(AsciiFoldingFilter),
             FilterSpec::StopWords { language: Some(lang), words: None } => {
                 let lang = language(lang)?;
-                let f = StopWordFilter::new(lang).ok_or_else(|| {
-                    FfiError::invalid(format!("Tantivy has no stop-word list for {lang:?}"))
-                })?;
+                let f = StopWordFilter::new(lang)
+                    .ok_or_else(|| FfiError::invalid(format!("Tantivy has no stop-word list for {lang:?}")))?;
                 builder.filter_dynamic(f)
             }
             FilterSpec::StopWords { language: None, words: Some(words) } => {

@@ -50,9 +50,7 @@ impl Snippets {
             let field = schema.get_field(name)?;
             let entry = schema.get_field_entry(field);
             if !matches!(entry.field_type(), FieldType::Str(_)) || !entry.is_stored() {
-                return Err(FfiError::invalid(format!(
-                    "snippets need a stored text field, but '{name}' is not one"
-                )));
+                return Err(FfiError::invalid(format!("snippets need a stored text field, but '{name}' is not one")));
             }
             let mut generator = SnippetGenerator::create(searcher, query, field)?;
             generator.set_max_num_chars(request.max_length);
@@ -62,10 +60,7 @@ impl Snippets {
     }
 
     pub fn for_doc(&self, doc: &TantivyDocument) -> BTreeMap<String, SnippetJson> {
-        self.generators
-            .iter()
-            .map(|(name, g)| (name.clone(), to_json(&g.snippet_from_doc(doc))))
-            .collect()
+        self.generators.iter().map(|(name, g)| (name.clone(), to_json(&g.snippet_from_doc(doc)))).collect()
     }
 }
 

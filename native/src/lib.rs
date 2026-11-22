@@ -28,6 +28,8 @@ mod settings;
 mod snippets;
 mod sorting;
 mod stats;
+#[cfg(test)]
+mod testing;
 
 use std::sync::Mutex;
 
@@ -96,9 +98,7 @@ impl TdnIndex {
 
 impl TdnWriter {
     fn lock(&self) -> FfiResult<std::sync::MutexGuard<'_, IndexWriter>> {
-        self.writer
-            .lock()
-            .map_err(|_| FfiError::new(ffi::status::ERROR, "writer is unusable after an earlier panic"))
+        self.writer.lock().map_err(|_| FfiError::new(ffi::status::ERROR, "writer is unusable after an earlier panic"))
     }
 
     fn parse_doc(&self, json: &str) -> FfiResult<TantivyDocument> {
@@ -192,11 +192,7 @@ pub unsafe extern "C" fn tdn_index_open_in_dir(
 
 /// Returns the index's schema as schema JSON.
 #[no_mangle]
-pub unsafe extern "C" fn tdn_index_schema(
-    index: *const TdnIndex,
-    out: *mut TdnString,
-    err: *mut TdnString,
-) -> i32 {
+pub unsafe extern "C" fn tdn_index_schema(index: *const TdnIndex, out: *mut TdnString, err: *mut TdnString) -> i32 {
     guard(err, || {
         let index = handle(index, "index")?;
         let json = schema_spec::schema_to_json(&index.index.schema(), &index.analyzers);
@@ -206,11 +202,7 @@ pub unsafe extern "C" fn tdn_index_schema(
 
 /// Returns the settings the index was created with, as settings JSON (see `settings`).
 #[no_mangle]
-pub unsafe extern "C" fn tdn_index_settings(
-    index: *const TdnIndex,
-    out: *mut TdnString,
-    err: *mut TdnString,
-) -> i32 {
+pub unsafe extern "C" fn tdn_index_settings(index: *const TdnIndex, out: *mut TdnString, err: *mut TdnString) -> i32 {
     guard(err, || {
         let index = handle(index, "index")?;
         let json = settings::to_json(index.index.settings());
@@ -393,7 +385,11 @@ pub unsafe extern "C" fn tdn_writer_rollback(writer: *const TdnWriter, err: *mut
 /// Merges the committed segments down to at most `max_segments`, also rewriting segments with
 /// deleted documents (see `merging::force_merge`). Blocks until done.
 #[no_mangle]
-pub unsafe extern "C" fn tdn_writer_force_merge(writer: *const TdnWriter, max_segments: u32, err: *mut TdnString) -> i32 {
+pub unsafe extern "C" fn tdn_writer_force_merge(
+    writer: *const TdnWriter,
+    max_segments: u32,
+    err: *mut TdnString,
+) -> i32 {
     guard(err, || {
         let w = handle(writer, "writer")?;
         merging::force_merge(&mut *w.lock()?, &w.index, &w.merge_policy, max_segments as usize)
@@ -403,7 +399,11 @@ pub unsafe extern "C" fn tdn_writer_force_merge(writer: *const TdnWriter, max_se
 /// Deletes index files no longer used by the index or an open searcher; returns
 /// `{"deleted": [names], "failed": [names]}`.
 #[no_mangle]
-pub unsafe extern "C" fn tdn_writer_garbage_collect(writer: *const TdnWriter, out: *mut TdnString, err: *mut TdnString) -> i32 {
+pub unsafe extern "C" fn tdn_writer_garbage_collect(
+    writer: *const TdnWriter,
+    out: *mut TdnString,
+    err: *mut TdnString,
+) -> i32 {
     guard(err, || {
         let result = handle(writer, "writer")?.lock()?.garbage_collect_files().wait()?;
         write_out(out, TdnString::from_string(merging::gc_to_json(result)), "result")
@@ -498,7 +498,11 @@ pub unsafe extern "C" fn tdn_searcher_explain(
 
 /// Returns statistics of the searcher's snapshot as stats JSON (see `stats`).
 #[no_mangle]
-pub unsafe extern "C" fn tdn_searcher_stats(searcher: *const TdnSearcher, out: *mut TdnString, err: *mut TdnString) -> i32 {
+pub unsafe extern "C" fn tdn_searcher_stats(
+    searcher: *const TdnSearcher,
+    out: *mut TdnString,
+    err: *mut TdnString,
+) -> i32 {
     guard(err, || {
         let s = handle(searcher, "searcher")?;
         write_out(out, TdnString::from_string(stats::to_json(&s.searcher)?), "stats")
@@ -528,7 +532,8 @@ pub unsafe extern "C" fn tdn_index_reader(
 ) -> i32 {
     guard(err, || {
         let index = &handle(index, "index")?.index;
-        let policy = if flags & READER_RELOAD_ON_COMMIT != 0 { ReloadPolicy::OnCommitWithDelay } else { ReloadPolicy::Manual };
+        let policy =
+            if flags & READER_RELOAD_ON_COMMIT != 0 { ReloadPolicy::OnCommitWithDelay } else { ReloadPolicy::Manual };
         let reader = index.reader_builder().reload_policy(policy).try_into()?;
         write_out(out, Box::into_raw(Box::new(TdnReader { index: index.clone(), reader })), "reader")
     })
@@ -593,5 +598,145 @@ pub mod timing {
     /// Runs a search request exactly as `tdn_searcher_search` does and returns the result JSON.
     pub fn search(searcher: &Searcher, index: &Index, request_json: &str) -> Result<String, String> {
         crate::search::run(searcher, index, request_json).map_err(|e| e.message)
+    }
+}
+
+/// The C ABI itself: status codes, error strings and handles, called as .NET calls them.
+#[cfg(test)]
+mod abi_tests {
+    use super::*;
+    use crate::ffi::status;
+
+    fn empty() -> TdnString {
+        TdnString { ptr: std::ptr::null_mut(), len: 0 }
+    }
+
+    /// Takes (and frees) a returned string.
+    unsafe fn take(s: TdnString) -> String {
+        let text = String::from_utf8(std::slice::from_raw_parts(s.ptr, s.len).to_vec()).unwrap();
+        tdn_string_free(s);
+        text
+    }
+
+    const SCHEMA: &str = r#"{"fields":[{"name":"t","type":"text","stored":true}]}"#;
+
+    unsafe fn ram_index() -> *mut TdnIndex {
+        let (mut index, mut err) = (std::ptr::null_mut(), empty());
+        let code = tdn_index_create_in_ram(SCHEMA.as_ptr(), SCHEMA.len(), std::ptr::null(), 0, &mut index, &mut err);
+        assert_eq!(code, status::OK);
+        index
+    }
+
+    #[test]
+    fn round_trip_through_the_exports() {
+        unsafe {
+            let index = ram_index();
+            let (mut writer, mut err) = (std::ptr::null_mut(), empty());
+            assert_eq!(tdn_index_writer(index, 15_000_000, 1, 0, std::ptr::null(), 0, &mut writer, &mut err), 0);
+            let doc = r#"{"t":"hello wörld"}"#;
+            assert_eq!(tdn_writer_add_json(writer, doc.as_ptr(), doc.len(), &mut err), 0);
+            assert_eq!(tdn_writer_commit(writer, &mut err), 0);
+            let mut searcher = std::ptr::null_mut();
+            assert_eq!(tdn_index_searcher(index, &mut searcher, &mut err), 0);
+            assert_eq!(tdn_searcher_num_docs(searcher), 1);
+            let request = r#"{"query":{"type":"parse","text":"wörld"}}"#;
+            let mut out = empty();
+            assert_eq!(tdn_searcher_search(searcher, request.as_ptr(), request.len(), &mut out, &mut err), 0);
+            let result: serde_json::Value = serde_json::from_str(&take(out)).unwrap();
+            assert_eq!(result["count"], 1);
+            assert_eq!(result["hits"][0]["doc"]["t"][0], "hello wörld");
+            tdn_searcher_free(searcher);
+            tdn_writer_free(writer);
+            tdn_index_free(index);
+        }
+    }
+
+    #[test]
+    fn errors_come_back_as_status_and_message() {
+        unsafe {
+            let mut err = empty();
+            let mut index = std::ptr::null_mut();
+            let bad = "{";
+            assert_eq!(
+                tdn_index_create_in_ram(bad.as_ptr(), 1, std::ptr::null(), 0, &mut index, &mut err),
+                status::INVALID_ARGUMENT
+            );
+            assert!(take(err).contains("invalid schema JSON"));
+            assert!(index.is_null(), "no handle on failure");
+
+            // Invalid UTF-8, and a null pointer with a length.
+            let mut err = empty();
+            let bytes = [0xff, 0xfe];
+            assert_eq!(
+                tdn_index_create_in_ram(bytes.as_ptr(), 2, std::ptr::null(), 0, &mut index, &mut err),
+                status::INVALID_ARGUMENT
+            );
+            assert!(take(err).contains("invalid UTF-8"));
+            let mut err = empty();
+            assert_eq!(
+                tdn_index_create_in_ram(std::ptr::null(), 5, std::ptr::null(), 0, &mut index, &mut err),
+                status::INVALID_ARGUMENT
+            );
+            assert!(take(err).contains("null pointer"));
+
+            // Null handles and out-parameters.
+            let mut err = empty();
+            let mut out = empty();
+            assert_eq!(
+                tdn_searcher_search(std::ptr::null(), std::ptr::null(), 0, &mut out, &mut err),
+                status::INVALID_ARGUMENT
+            );
+            assert!(take(err).contains("searcher handle is null"));
+            let index = ram_index();
+            let mut err = empty();
+            assert_eq!(tdn_index_schema(index, std::ptr::null_mut(), &mut err), status::INVALID_ARGUMENT);
+            assert!(take(err).contains("out-parameter is null"));
+            // A null error out-parameter is allowed: the status still comes back.
+            assert_eq!(tdn_index_schema(index, std::ptr::null_mut(), std::ptr::null_mut()), status::INVALID_ARGUMENT);
+            assert_eq!(tdn_searcher_num_docs(std::ptr::null()), 0);
+            tdn_index_free(index);
+
+            // Freeing null is a no-op.
+            tdn_index_free(std::ptr::null_mut());
+            tdn_writer_free(std::ptr::null_mut());
+            tdn_writer_free_no_wait(std::ptr::null_mut());
+            tdn_searcher_free(std::ptr::null_mut());
+            tdn_reader_free(std::ptr::null_mut());
+            tdn_string_free(empty());
+        }
+    }
+
+    #[test]
+    fn panics_become_a_status() {
+        let mut err = empty();
+        let code = ffi::guard(&mut err, || panic!("boom {}", 42));
+        assert_eq!(code, status::PANIC);
+        assert_eq!(unsafe { take(err) }, "native panic: boom 42");
+        let mut err = empty();
+        assert_eq!(ffi::guard(&mut err, || std::panic::panic_any(7u8)), status::PANIC);
+        assert_eq!(unsafe { take(err) }, "native panic: unknown panic payload");
+    }
+
+    #[test]
+    fn only_one_writer_at_a_time() {
+        unsafe {
+            let index = ram_index();
+            let (mut first, mut second, mut err) = (std::ptr::null_mut(), std::ptr::null_mut(), empty());
+            assert_eq!(tdn_index_writer(index, 15_000_000, 1, 0, std::ptr::null(), 0, &mut first, &mut err), 0);
+            assert_eq!(
+                tdn_index_writer(index, 15_000_000, 1, 0, std::ptr::null(), 0, &mut second, &mut err),
+                status::LOCK_BUSY
+            );
+            tdn_string_free(err);
+            tdn_writer_free(first);
+            let mut err = empty();
+            assert_eq!(
+                tdn_index_writer(index, 15_000_000, 1, 0, std::ptr::null(), 0, &mut second, &mut err),
+                0,
+                "lock released"
+            );
+            tdn_writer_free_no_wait(second);
+            tdn_index_free(index);
+        }
     }
 }

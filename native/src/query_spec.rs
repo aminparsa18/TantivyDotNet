@@ -18,9 +18,8 @@ use std::ops::Bound;
 
 use serde::Deserialize;
 use tantivy::query::{
-    AllQuery, BooleanQuery, BoostQuery, ConstScoreQuery, DisjunctionMaxQuery, EmptyQuery, ExistsQuery,
-    FuzzyTermQuery, MoreLikeThisQuery, Occur, PhraseQuery, Query, QueryParser, RangeQuery, RegexQuery,
-    TermQuery, TermSetQuery,
+    AllQuery, BooleanQuery, BoostQuery, ConstScoreQuery, DisjunctionMaxQuery, EmptyQuery, ExistsQuery, FuzzyTermQuery,
+    MoreLikeThisQuery, Occur, PhraseQuery, Query, QueryParser, RangeQuery, RegexQuery, TermQuery, TermSetQuery,
 };
 use tantivy::schema::{Field, FieldType, IndexRecordOption, OwnedValue, Schema};
 use tantivy::{DateTime, Index, Term};
@@ -228,9 +227,8 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
         }
 
         QuerySpec::Range { field, lower, upper } => {
-            let (f, path) = schema
-                .find_field(field)
-                .ok_or_else(|| FfiError::invalid(format!("unknown field '{field}'")))?;
+            let (f, path) =
+                schema.find_field(field).ok_or_else(|| FfiError::invalid(format!("unknown field '{field}'")))?;
             let entry = schema.get_field_entry(f);
             if !entry.is_indexed() && !entry.is_fast() {
                 return Err(FfiError::invalid(format!(
@@ -246,13 +244,19 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
                     None => Bound::Unbounded,
                     Some(b) => {
                         let term = match ft {
-                            FieldType::JsonObject(o) => {
-                                Target::Json { field: f, path: path.to_owned(), expand_dots: o.is_expand_dots_enabled() }
-                                    .term(field, &b.value)?
+                            FieldType::JsonObject(o) => Target::Json {
+                                field: f,
+                                path: path.to_owned(),
+                                expand_dots: o.is_expand_dots_enabled(),
                             }
+                            .term(field, &b.value)?,
                             _ => make_term(f, field, ft, &b.value)?,
                         };
-                        if b.inclusive { Bound::Included(term) } else { Bound::Excluded(term) }
+                        if b.inclusive {
+                            Bound::Included(term)
+                        } else {
+                            Bound::Excluded(term)
+                        }
                     }
                 })
             };
@@ -269,13 +273,14 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
         QuerySpec::Regex { field, pattern } => {
             let (f, ft) = indexed_field(&schema, field)?;
             require_text(field, ft, "regex")?;
-            Box::new(RegexQuery::from_pattern(pattern, f).map_err(|e| FfiError::invalid(format!("invalid regex: {e}")))?)
+            Box::new(
+                RegexQuery::from_pattern(pattern, f).map_err(|e| FfiError::invalid(format!("invalid regex: {e}")))?,
+            )
         }
 
         QuerySpec::Exists { field } => {
-            let (f, _) = schema
-                .find_field(field)
-                .ok_or_else(|| FfiError::invalid(format!("unknown field '{field}'")))?;
+            let (f, _) =
+                schema.find_field(field).ok_or_else(|| FfiError::invalid(format!("unknown field '{field}'")))?;
             if !schema.get_field_entry(f).is_fast() {
                 return Err(FfiError::invalid(format!(
                     "field '{field}' isn't a fast field, so an exists query can't check it (create it with fast: true)"
@@ -322,14 +327,30 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
             }
             let o = options;
             let mut b = MoreLikeThisQuery::builder();
-            if let Some(v) = o.min_doc_frequency { b = b.with_min_doc_frequency(v); }
-            if let Some(v) = o.max_doc_frequency { b = b.with_max_doc_frequency(v); }
-            if let Some(v) = o.min_term_frequency { b = b.with_min_term_frequency(v); }
-            if let Some(v) = o.max_query_terms { b = b.with_max_query_terms(v); }
-            if let Some(v) = o.min_word_length { b = b.with_min_word_length(v); }
-            if let Some(v) = o.max_word_length { b = b.with_max_word_length(v); }
-            if let Some(v) = o.boost_factor { b = b.with_boost_factor(v); }
-            if let Some(v) = &o.stop_words { b = b.with_stop_words(v.clone()); }
+            if let Some(v) = o.min_doc_frequency {
+                b = b.with_min_doc_frequency(v);
+            }
+            if let Some(v) = o.max_doc_frequency {
+                b = b.with_max_doc_frequency(v);
+            }
+            if let Some(v) = o.min_term_frequency {
+                b = b.with_min_term_frequency(v);
+            }
+            if let Some(v) = o.max_query_terms {
+                b = b.with_max_query_terms(v);
+            }
+            if let Some(v) = o.min_word_length {
+                b = b.with_min_word_length(v);
+            }
+            if let Some(v) = o.max_word_length {
+                b = b.with_max_word_length(v);
+            }
+            if let Some(v) = o.boost_factor {
+                b = b.with_boost_factor(v);
+            }
+            if let Some(v) = &o.stop_words {
+                b = b.with_stop_words(v.clone());
+            }
             Box::new(b.with_document_fields(fields))
         }
 
@@ -400,10 +421,7 @@ fn indexed_field<'a>(schema: &'a Schema, name: &str) -> FfiResult<(Field, &'a Fi
 fn require_text(name: &str, ft: &FieldType, what: &str) -> FfiResult<()> {
     match ft {
         FieldType::Str(_) => Ok(()),
-        _ => Err(FfiError::invalid(format!(
-            "a {what} query needs a text field, but '{name}' is {}",
-            type_name(ft)
-        ))),
+        _ => Err(FfiError::invalid(format!("a {what} query needs a text field, but '{name}' is {}", type_name(ft)))),
     }
 }
 
@@ -415,9 +433,7 @@ enum Target<'a> {
 }
 
 fn term_target<'a>(schema: &'a Schema, name: &str) -> FfiResult<Target<'a>> {
-    let (field, path) = schema
-        .find_field(name)
-        .ok_or_else(|| FfiError::invalid(format!("unknown field '{name}'")))?;
+    let (field, path) = schema.find_field(name).ok_or_else(|| FfiError::invalid(format!("unknown field '{name}'")))?;
     let entry = schema.get_field_entry(field);
     if !entry.is_indexed() {
         return Err(FfiError::invalid(format!("field '{}' is not indexed", entry.name())));
@@ -551,5 +567,306 @@ fn value_name(v: &ValueSpec) -> String {
         ValueSpec::Bytes(_) => "bytes".into(),
         ValueSpec::Facet(p) => format!("the facet path '{p}'"),
         ValueSpec::Ip(ip) => format!("the IP address {ip}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ffi::status;
+    use crate::testing::{term, Fixture};
+
+    const SCHEMA: &str = r#"{"fields":[
+        {"name":"title","type":"text","stored":true},
+        {"name":"body","type":"text"},
+        {"name":"id","type":"text","tokenizer":"raw","fast":true,"stored":true},
+        {"name":"year","type":"u64","fast":true,"stored":true},
+        {"name":"delta","type":"i64","fast":true},
+        {"name":"price","type":"f64","fast":true},
+        {"name":"flag","type":"bool"},
+        {"name":"when","type":"date","fast":true},
+        {"name":"cat","type":"facet"},
+        {"name":"attrs","type":"json"},
+        {"name":"ip","type":"ip","fast":true},
+        {"name":"blob","type":"bytes"},
+        {"name":"note","type":"text","stored":true,"indexed":false}]}"#;
+
+    /// Three books over two segments.
+    fn books() -> Fixture {
+        Fixture::new(
+            SCHEMA,
+            &[
+                &[
+                    r#"{"title":"Of Mice and Men","body":"two drifters in california","id":"a","year":1937,"delta":-5,
+                        "price":9.5,"flag":true,"when":"2001-09-09T01:46:40Z","cat":"/fiction/classic",
+                        "attrs":{"color":"red","n":5},"ip":"10.0.0.1","blob":"AQI=","note":"x"}"#,
+                    r#"{"title":"The Grapes of Wrath","body":"a family in california during the dust bowl","id":"b",
+                        "year":1939,"delta":3,"price":12.0,"flag":false,"cat":"/fiction/classic",
+                        "attrs":{"color":"blue","n":5.5},"ip":"::1"}"#,
+                ],
+                &[r#"{"title":"East of Eden","body":"two families in the salinas valley","id":"c","year":1952,
+                      "cat":"/fiction","attrs":{"n":7}}"#],
+            ],
+        )
+    }
+
+    fn assert_invalid(f: &Fixture, query: &str, fragment: &str) {
+        let e = f.query_error(query);
+        assert_eq!(e.code, status::INVALID_ARGUMENT, "{query}: {}", e.message);
+        assert!(e.message.contains(fragment), "{query}: expected '{fragment}' in '{}'", e.message);
+    }
+
+    #[test]
+    fn term_values_are_not_analyzed() {
+        let f = books();
+        assert_eq!(f.count(&term("title", r#"{"str":"mice"}"#)), 1);
+        assert_eq!(f.count(&term("title", r#"{"str":"Mice"}"#)), 0);
+        assert_eq!(f.count(&term("id", r#"{"str":"a"}"#)), 1);
+        assert_eq!(f.count(r#"{"type":"all"}"#), 3);
+    }
+
+    #[test]
+    fn numbers_convert_to_the_field_type_when_lossless() {
+        let f = books();
+        assert_eq!(f.count(&term("year", r#"{"u64":1937}"#)), 1);
+        assert_eq!(f.count(&term("year", r#"{"i64":1937}"#)), 1);
+        assert_eq!(f.count(&term("delta", r#"{"u64":3}"#)), 1);
+        assert_eq!(f.count(&term("delta", r#"{"i64":-5}"#)), 1);
+        assert_eq!(f.count(&term("price", r#"{"i64":12}"#)), 1);
+        assert_eq!(f.count(&term("price", r#"{"u64":12}"#)), 1);
+        assert_eq!(f.count(&term("price", r#"{"f64":9.5}"#)), 1);
+        assert_invalid(&f, &term("year", r#"{"i64":-1}"#), "can't be queried with the integer -1");
+        assert_invalid(&f, &term("delta", r#"{"u64":18446744073709551615}"#), "unsigned integer");
+        assert_invalid(&f, &term("year", r#"{"f64":1937.0}"#), "the number 1937");
+        assert_invalid(&f, &term("year", r#"{"str":"1937"}"#), "a u64 field and can't be queried with a string");
+    }
+
+    #[test]
+    fn other_value_kinds() {
+        let f = books();
+        assert_eq!(f.count(&term("flag", r#"{"bool":true}"#)), 1);
+        assert_eq!(f.count(&term("when", r#"{"date":1000000000000000}"#)), 1);
+        assert_eq!(f.count(&term("blob", r#"{"bytes":[1,2]}"#)), 1);
+        assert_eq!(f.count(&term("ip", r#"{"ip":"10.0.0.1"}"#)), 1);
+        assert_eq!(f.count(&term("ip", r#"{"ip":"::ffff:10.0.0.1"}"#)), 1);
+        assert_eq!(f.count(&term("ip", r#"{"ip":"::1"}"#)), 1);
+        assert_invalid(&f, &term("ip", r#"{"ip":"10.0.0"}"#), "not an IP address");
+        assert_invalid(&f, &term("ip", r#"{"str":"10.0.0.1"}"#), "an IP address field");
+        assert_invalid(&f, &term("blob", r#"{"bytes":[256]}"#), "invalid query JSON");
+    }
+
+    #[test]
+    fn facet_terms_match_the_path_and_its_descendants() {
+        let f = books();
+        assert_eq!(f.count(&term("cat", r#"{"facet":"/fiction/classic"}"#)), 2);
+        assert_eq!(f.count(&term("cat", r#"{"str":"/fiction"}"#)), 3);
+        assert_invalid(&f, &term("title", r#"{"facet":"/fiction"}"#), "can't be queried with the facet path");
+        assert_invalid(&f, &term("cat", r#"{"facet":"fiction"}"#), "fiction");
+    }
+
+    #[test]
+    fn unknown_and_unindexed_fields() {
+        let f = books();
+        assert_invalid(&f, &term("nope", r#"{"str":"a"}"#), "unknown field 'nope'");
+        assert_invalid(&f, &term("note", r#"{"str":"x"}"#), "not indexed");
+        assert_invalid(&f, r#"{"type":"fuzzy","field":"note","value":"x","distance":1}"#, "not indexed");
+    }
+
+    #[test]
+    fn json_paths_normalize_numbers_like_indexing() {
+        let f = books();
+        assert_eq!(f.count(&term("attrs.color", r#"{"str":"red"}"#)), 1);
+        assert_eq!(f.count(&term("attrs.n", r#"{"u64":5}"#)), 1);
+        assert_eq!(f.count(&term("attrs.n", r#"{"i64":5}"#)), 1);
+        assert_eq!(f.count(&term("attrs.n", r#"{"f64":5.0}"#)), 1);
+        assert_eq!(f.count(&term("attrs.n", r#"{"f64":5.5}"#)), 1);
+        assert_eq!(f.count(&term("attrs.missing", r#"{"str":"red"}"#)), 0);
+        assert_invalid(&f, &term("attrs", r#"{"str":"red"}"#), "query a path inside it");
+        assert_invalid(&f, &term("attrs.n", r#"{"bytes":[1]}"#), "can't be queried with bytes");
+        let range = r#"{"type":"range","field":"attrs.n","lower":{"value":{"i64":6},"inclusive":true},"upper":null}"#;
+        // Tantivy only runs ranges on JSON paths of fast JSON fields.
+        assert_invalid(&f, range, "only supported for fast fields");
+    }
+
+    #[test]
+    fn fuzzy() {
+        let f = books();
+        assert_eq!(f.count(r#"{"type":"fuzzy","field":"title","value":"mise","distance":1}"#), 1);
+        assert_eq!(f.count(r#"{"type":"fuzzy","field":"title","value":"mise","distance":0}"#), 0);
+        assert_eq!(f.count(r#"{"type":"fuzzy","field":"title","value":"grap","distance":0,"prefix":true}"#), 1);
+        assert_eq!(f.count(r#"{"type":"fuzzy","field":"title","value":"mcie","distance":1}"#), 1);
+        let no_transpositions =
+            r#"{"type":"fuzzy","field":"title","value":"mcie","distance":1,"transpositions":false}"#;
+        assert_eq!(f.count(no_transpositions), 0);
+        assert_invalid(&f, r#"{"type":"fuzzy","field":"title","value":"x","distance":3}"#, "between 0 and 2");
+        assert_invalid(&f, r#"{"type":"fuzzy","field":"year","value":"x","distance":1}"#, "needs a text field");
+        assert_invalid(&f, r#"{"type":"fuzzy","field":"title","value":"x","distance":256}"#, "invalid query JSON");
+    }
+
+    #[test]
+    fn phrases_use_the_field_tokenizer() {
+        let f = books();
+        let phrase =
+            |text: &str, slop: u32| format!(r#"{{"type":"phrase","field":"body","text":"{text}","slop":{slop}}}"#);
+        assert_eq!(f.count(&phrase("two drifters", 0)), 1);
+        assert_eq!(f.count(&phrase("Two DRIFTERS!", 0)), 1);
+        assert_eq!(f.count(&phrase("drifters two", 0)), 0);
+        assert_eq!(f.count(&phrase("two california", 0)), 0);
+        assert_eq!(f.count(&phrase("two california", 2)), 1);
+        assert_eq!(f.count(&phrase("california", 0)), 2); // one token: a term query
+        assert_eq!(f.count(&phrase(" , ! ", 0)), 0); // no tokens: matches nothing
+        assert_eq!(f.count(&phrase("", 0)), 0);
+        assert_invalid(&f, r#"{"type":"phrase","field":"year","text":"1937"}"#, "needs a text field");
+    }
+
+    #[test]
+    fn booleans() {
+        let f = books();
+        let a = term("id", r#"{"str":"a"}"#);
+        let b = term("id", r#"{"str":"b"}"#);
+        let cal = term("body", r#"{"str":"california"}"#);
+        assert_eq!(f.count(&format!(r#"{{"type":"boolean","must_not":[{a}]}}"#)), 2, "only must_not = all except");
+        assert_eq!(f.count(&format!(r#"{{"type":"boolean","should":[{a},{b}]}}"#)), 2);
+        assert_eq!(f.count(&format!(r#"{{"type":"boolean","must":[{cal}],"must_not":[{a}]}}"#)), 1);
+        assert_eq!(f.count(&format!(r#"{{"type":"boolean","must":[{a},{b}]}}"#)), 0);
+        assert_eq!(f.count(r#"{"type":"boolean"}"#), 0);
+        // An error anywhere in the tree fails the whole query.
+        assert_invalid(&f, &format!(r#"{{"type":"boolean","should":[{a},{}]}}"#, term("x", r#"{"str":"a"}"#)), "'x'");
+    }
+
+    #[test]
+    fn ranges() {
+        let f = books();
+        let range = |field: &str, lower: &str, upper: &str| {
+            format!(r#"{{"type":"range","field":"{field}","lower":{lower},"upper":{upper}}}"#)
+        };
+        let incl = |v: &str| format!(r#"{{"value":{v},"inclusive":true}}"#);
+        let excl = |v: &str| format!(r#"{{"value":{v},"inclusive":false}}"#);
+        assert_eq!(f.count(&range("year", &incl(r#"{"u64":1937}"#), &incl(r#"{"u64":1939}"#))), 2);
+        assert_eq!(f.count(&range("year", &excl(r#"{"u64":1937}"#), &incl(r#"{"u64":1939}"#))), 1);
+        assert_eq!(f.count(&range("year", &excl(r#"{"i64":1937}"#), "null")), 2);
+        assert_eq!(f.count(&range("year", "null", &excl(r#"{"u64":1937}"#))), 0);
+        assert_eq!(f.count(&range("delta", &incl(r#"{"i64":-10}"#), &incl(r#"{"i64":0}"#))), 1);
+        assert_eq!(f.count(&range("price", &incl(r#"{"i64":10}"#), "null")), 1);
+        assert_eq!(f.count(&range("when", &incl(r#"{"date":0}"#), "null")), 1);
+        assert_eq!(f.count(&range("id", &incl(r#"{"str":"a"}"#), &incl(r#"{"str":"b"}"#))), 2);
+        assert_invalid(&f, &range("year", "null", "null"), "at least one bound");
+        assert_invalid(&f, &range("note", &incl(r#"{"str":"a"}"#), "null"), "neither indexed nor fast");
+        assert_invalid(&f, &range("year", &incl(r#"{"str":"a"}"#), "null"), "can't be queried with a string");
+        assert_invalid(&f, &range("nope", &incl(r#"{"u64":1}"#), "null"), "unknown field");
+    }
+
+    #[test]
+    fn scoring_wrappers_reject_non_finite_numbers() {
+        let f = books();
+        let a = term("id", r#"{"str":"a"}"#);
+        assert_eq!(f.count(&format!(r#"{{"type":"boost","query":{a},"factor":2.5}}"#)), 1);
+        assert_eq!(f.count(&format!(r#"{{"type":"const_score","query":{a},"score":1}}"#)), 1);
+        // 1e39 is finite JSON but infinite as an f32.
+        assert_invalid(&f, &format!(r#"{{"type":"boost","query":{a},"factor":1e39}}"#), "finite");
+        assert_invalid(&f, &format!(r#"{{"type":"const_score","query":{a},"score":-1e39}}"#), "finite");
+        assert_eq!(f.count(&format!(r#"{{"type":"disjunction_max","queries":[{a}],"tie_breaker":0.3}}"#)), 1);
+        assert_eq!(f.count(r#"{"type":"disjunction_max","queries":[]}"#), 0);
+        assert_invalid(
+            &f,
+            &format!(r#"{{"type":"disjunction_max","queries":[{a}],"tie_breaker":1.5}}"#),
+            "between 0 and 1",
+        );
+        assert_invalid(
+            &f,
+            &format!(r#"{{"type":"disjunction_max","queries":[{a}],"tie_breaker":-0.1}}"#),
+            "between 0 and 1",
+        );
+    }
+
+    #[test]
+    fn regex_exists_and_term_sets() {
+        let f = books();
+        assert_eq!(f.count(r#"{"type":"regex","field":"title","pattern":"gr.*"}"#), 1);
+        assert_invalid(&f, r#"{"type":"regex","field":"title","pattern":"("}"#, "invalid regex");
+        assert_invalid(&f, r#"{"type":"regex","field":"year","pattern":"1.*"}"#, "needs a text field");
+        assert_eq!(f.count(r#"{"type":"exists","field":"year"}"#), 3);
+        assert_eq!(f.count(r#"{"type":"exists","field":"delta"}"#), 2);
+        assert_eq!(f.count(r#"{"type":"exists","field":"ip"}"#), 2);
+        assert_invalid(&f, r#"{"type":"exists","field":"title"}"#, "isn't a fast field");
+        assert_invalid(&f, r#"{"type":"exists","field":"nope"}"#, "unknown field");
+        assert_eq!(f.count(r#"{"type":"term_set","field":"id","values":[{"str":"a"},{"str":"c"}]}"#), 2);
+        assert_eq!(f.count(r#"{"type":"term_set","field":"year","values":[{"i64":1937},{"u64":1952}]}"#), 2);
+        assert_eq!(f.count(r#"{"type":"term_set","field":"id","values":[]}"#), 0);
+        assert_invalid(&f, r#"{"type":"term_set","field":"year","values":[{"u64":1},{"str":"x"}]}"#, "string");
+    }
+
+    #[test]
+    fn more_like_this() {
+        let f = books();
+        let mlt = |doc: &str| {
+            format!(
+                r#"{{"type":"more_like_this","document":{doc},
+                    "options":{{"min_doc_frequency":1,"min_term_frequency":1,"min_word_length":1}}}}"#
+            )
+        };
+        assert!(f.count(&mlt(r#"{"body":["two families in california"]}"#)) >= 2);
+        assert!(f.count(&mlt(r#"{"body":"salinas valley"}"#)) >= 1);
+        assert_invalid(&f, &mlt(r#"{"nope":["x"]}"#), "nope");
+        assert_invalid(&f, &mlt(r#"{"year":["not a number"]}"#), "field 'year'");
+    }
+
+    #[test]
+    fn parsed_queries() {
+        let f = books();
+        let parse = |text: &str, extra: &str| format!(r#"{{"type":"parse","text":"{text}"{extra}}}"#);
+        assert_eq!(f.count(&parse("mice", "")), 1);
+        assert_eq!(f.count(&parse("year:[1937 TO 1939]", "")), 2);
+        assert_eq!(f.count(&parse("two california", r#","default_fields":["body"]"#)), 3);
+        assert_eq!(f.count(&parse("two california", r#","default_fields":["body"],"conjunction":true"#)), 1);
+        assert_eq!(f.count(&parse("mcie", r#","fuzzy":{"title":{"distance":1}}"#)), 1);
+        assert_eq!(f.count(&parse("mice", r#","boosts":{"title":2.0}"#)), 1);
+
+        let e = f.query_error(&parse("title:(", ""));
+        assert_eq!(e.code, status::QUERY_PARSE, "{}", e.message);
+        assert!(f.try_count(&parse("title:( mice", r#","lenient":true"#)).is_ok());
+
+        assert_invalid(&f, &parse("x", r#","default_fields":["nope"]"#), "nope");
+        assert_invalid(&f, &parse("x", r#","boosts":{"title":1e39}"#), "finite");
+        assert_invalid(&f, &parse("x", r#","fuzzy":{"title":{"distance":3}}"#), "between 0 and 2");
+        assert_invalid(&f, &parse("x", r#","fuzzy":{"year":{"distance":1}}"#), "needs a text field");
+    }
+
+    #[test]
+    fn malformed_query_json() {
+        let f = books();
+        for json in [
+            "",
+            "null",
+            "{}",
+            r#"{"type":"nope"}"#,
+            r#"{"type":"term","field":"id"}"#,
+            r#"{"type":"term","field":"id","value":{"str":1}}"#,
+            r#"{"type":"term","field":"id","value":{"str":"a","u64":1}}"#,
+            r#"{"type":"boost","query":{"type":"all"}}"#,
+        ] {
+            assert_invalid(&f, json, "invalid query JSON");
+        }
+    }
+
+    #[test]
+    fn term_of_accepts_only_term_queries() {
+        let f = books();
+        let schema = f.index.schema();
+        assert!(term_of(&parse_spec(&term("id", r#"{"str":"a"}"#)).unwrap(), &schema).is_ok());
+        assert!(term_of(&parse_spec(&term("attrs.color", r#"{"str":"a"}"#)).unwrap(), &schema).is_ok());
+        let e = term_of(&parse_spec(r#"{"type":"all"}"#).unwrap(), &schema).unwrap_err();
+        assert_eq!(e.message, "expected a term query");
+    }
+
+    #[test]
+    fn deeply_nested_queries_fail_without_overflowing_the_stack() {
+        // serde_json stops at 128 levels of nesting, before `build` recurses that deep.
+        let f = books();
+        let mut q = String::from(r#"{"type":"all"}"#);
+        for _ in 0..200 {
+            q = format!(r#"{{"type":"boolean","must":[{q}]}}"#);
+        }
+        assert_invalid(&f, &q, "recursion limit");
     }
 }

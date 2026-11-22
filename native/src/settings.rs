@@ -65,10 +65,9 @@ pub fn from_json(json: &str) -> FfiResult<IndexSettings> {
         }
         settings.docstore_blocksize = block_size;
     }
-    settings.sort_by_field = spec.sort_by.map(|s| IndexSortByField {
-        field: s.field,
-        order: if s.descending { Order::Desc } else { Order::Asc },
-    });
+    settings.sort_by_field = spec
+        .sort_by
+        .map(|s| IndexSortByField { field: s.field, order: if s.descending { Order::Desc } else { Order::Asc } });
     Ok(settings)
 }
 

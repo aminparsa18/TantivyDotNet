@@ -13,17 +13,17 @@ use serde::ser::{SerializeMap, SerializeSeq};
 use serde::{Deserialize, Serialize, Serializer};
 use tantivy::aggregation::agg_result::AggregationResults;
 use tantivy::collector::{Count, MultiCollector};
-use tantivy::query::Query;
 use tantivy::query::Explanation;
+use tantivy::query::Query;
 use tantivy::schema::{Field, OwnedValue, Schema, Value};
 use tantivy::{DocAddress, Index, Searcher, TantivyDocument};
 
+use crate::aggregations;
 use crate::facets::{self, FacetRequest, FacetResultJson};
 use crate::ffi::{status, FfiError, FfiResult};
 use crate::query_spec::{self, QuerySpec};
 use crate::snippets::{SnippetJson, SnippetRequest, Snippets};
 use crate::sorting::{self, SearchAfter, SortKeyRequest};
-use crate::aggregations;
 
 #[derive(Deserialize)]
 struct SearchRequest {
@@ -45,6 +45,9 @@ struct SearchRequest {
     #[serde(default)]
     aggregations: Option<serde_json::Value>,
 }
+
+/// The largest `limit + offset`: the number of document ids in a segment.
+const MAX_WINDOW: usize = u32::MAX as usize;
 
 fn default_limit() -> usize {
     10
@@ -80,6 +83,13 @@ pub fn run(searcher: &Searcher, index: &Index, request_json: &str) -> FfiResult<
     let query = query_spec::build(&request.query, index)?;
     let only_fields = request.fields.as_deref().map(|names| stored_fields(&schema, names)).transpose()?;
 
+    // Bounded so the collectors' `limit + offset` can't overflow; no index holds more documents.
+    if request.limit.checked_add(request.offset).is_none_or(|k| k > MAX_WINDOW) {
+        return Err(FfiError::invalid(format!(
+            "limit + offset must be at most {MAX_WINDOW}, got {} + {}",
+            request.limit, request.offset
+        )));
+    }
     let top_plan = match request.limit {
         0 => None,
         limit => Some(sorting::plan(&request.sort, request.search_after.as_ref(), limit, request.offset, &schema)?),
@@ -119,7 +129,13 @@ pub fn run(searcher: &Searcher, index: &Index, request_json: &str) -> FfiResult<
             let addr = [address.segment_ord, address.doc_id];
             let only = only_fields.as_ref();
             if skip_docs {
-                return Ok(HitJson { score, sort, addr, doc: DocJson { doc: None, schema: &schema, only }, snippets: None });
+                return Ok(HitJson {
+                    score,
+                    sort,
+                    addr,
+                    doc: DocJson { doc: None, schema: &schema, only },
+                    snippets: None,
+                });
             }
             let doc: TantivyDocument = searcher.doc(address)?;
             let snippets = snippets.as_ref().map(|g| g.for_doc(&doc));
@@ -160,7 +176,8 @@ pub fn explain(searcher: &Searcher, index: &Index, query_json: &str, address: Do
         return Err(FfiError::invalid("the hit's document isn't in this searcher's snapshot"));
     }
     let explanation: Explanation = query.explain(searcher, address)?;
-    serde_json::to_string(&explanation).map_err(|e| FfiError::new(status::ERROR, format!("explanation serialization: {e}")))
+    serde_json::to_string(&explanation)
+        .map_err(|e| FfiError::new(status::ERROR, format!("explanation serialization: {e}")))
 }
 
 /// Resolves the requested field names; each must be a stored field.
@@ -194,10 +211,8 @@ impl Serialize for DocJson<'_> {
         let Some(doc) = &self.doc else {
             return serializer.serialize_map(Some(0))?.end();
         };
-        let mut values: Vec<_> = doc
-            .field_values()
-            .filter(|(field, _)| self.only.is_none_or(|only| only.contains(field)))
-            .collect();
+        let mut values: Vec<_> =
+            doc.field_values().filter(|(field, _)| self.only.is_none_or(|only| only.contains(field))).collect();
         // Group by field name (a stable sort keeps each field's values in stored order).
         values.sort_by(|a, b| self.schema.get_field_name(a.0).cmp(self.schema.get_field_name(b.0)));
         let fields = values.chunk_by(|a, b| a.0 == b.0);

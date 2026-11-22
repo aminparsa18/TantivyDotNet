@@ -21,6 +21,33 @@ env:
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
 jobs:
+  # 0. Rust checks: formatting, lints and the crate's unit tests (runs alongside the builds).
+  rust:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          key: checks
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: Unit tests
+        run: cargo test --locked
+
   # 1. Build the Rust cdylib once per RID.
   native:
     name: native (${{ matrix.rid }})
@@ -179,10 +206,15 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq clang zlib1g-dev
 
       - name: Test (net10.0, net11.0)
-        run: dotnet test --project tests/TantivyDotNet.Tests -c Release $PACKAGE_PROPS
+        run: |
+          # PACKAGE_PROPS holds several arguments: word splitting is intended.
+          # shellcheck disable=SC2086
+          dotnet test --project tests/TantivyDotNet.Tests -c Release $PACKAGE_PROPS
 
       - name: Publish NativeAOT smoke app
-        run: dotnet publish tests/TantivyDotNet.AotSmoke -c Release -r ${{ matrix.rid }} -o aot $PACKAGE_PROPS
+        run: |
+          # shellcheck disable=SC2086
+          dotnet publish tests/TantivyDotNet.AotSmoke -c Release -r ${{ matrix.rid }} -o aot $PACKAGE_PROPS
 
       - name: Run NativeAOT smoke app
         run: ./aot/TantivyDotNet.AotSmoke

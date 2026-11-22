@@ -20,6 +20,7 @@ pub mod status {
     pub const PANIC: i32 = 7;
 }
 
+#[derive(Debug)]
 pub struct FfiError {
     pub code: i32,
     pub message: String,

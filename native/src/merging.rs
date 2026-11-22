@@ -85,7 +85,12 @@ const MAX_ROUNDS: usize = 8;
 /// Merges the committed segments until at most `max_segments` remain and none has deleted
 /// documents. Background merges are paused (NoMergePolicy) meanwhile and `policy` is restored
 /// afterwards. Uncommitted segments are left alone.
-pub fn force_merge(writer: &mut IndexWriter, index: &Index, policy: &MergePolicySpec, max_segments: usize) -> FfiResult<()> {
+pub fn force_merge(
+    writer: &mut IndexWriter,
+    index: &Index,
+    policy: &MergePolicySpec,
+    max_segments: usize,
+) -> FfiResult<()> {
     if max_segments == 0 {
         return Err(FfiError::invalid("max_segments must be at least 1"));
     }

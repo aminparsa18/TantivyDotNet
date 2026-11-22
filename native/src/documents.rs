@@ -16,8 +16,7 @@ pub fn parse(schema: &Schema, json: &str, ignore_unknown_fields: bool) -> FfiRes
             return Err(unknown_field(schema, key));
         }
     }
-    TantivyDocument::from_json_object(schema, object)
-        .map_err(|e| FfiError::invalid(format!("invalid document: {e}")))
+    TantivyDocument::from_json_object(schema, object).map_err(|e| FfiError::invalid(format!("invalid document: {e}")))
 }
 
 fn unknown_field(schema: &Schema, key: &str) -> FfiError {
