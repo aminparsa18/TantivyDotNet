@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net11.0</TargetFramework>
+    <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -15,8 +15,17 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
-  <ItemGroup>
+  <!-- Normally tests run against the project. With TantivyPackageVersion set (CI), they run against the
+       packed TantivyDotNet package instead, restored from TantivyPackageSource. That checks the package
+       layout and the native library CI built for this runner's RID. -->
+  <ItemGroup Condition="'$(TantivyPackageVersion)' == ''">
     <ProjectReference Include="../../src/TantivyDotNet/TantivyDotNet.csproj" />
   </ItemGroup>
+  <ItemGroup Condition="'$(TantivyPackageVersion)' != ''">
+    <PackageReference Include="TantivyDotNet" Version="[$(TantivyPackageVersion)]" />
+  </ItemGroup>
+  <PropertyGroup Condition="'$(TantivyPackageVersion)' != ''">
+    <RestoreAdditionalProjectSources>$(TantivyPackageSource)</RestoreAdditionalProjectSources>
+  </PropertyGroup>
 
 </Project>

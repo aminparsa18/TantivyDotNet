@@ -1,14 +1,47 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net11.0</TargetFramework>
+    <TargetFrameworks>net10.0;net11.0</TargetFrameworks>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- csbindgen emits `unsafe` extern declarations -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Ships the XML docs and makes the compiler check every cref and flag undocumented public API. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Turns on the trim, AOT and single-file analyzers and marks the assembly trimmable. -->
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
 
+  <!-- NuGet package -->
+  <PropertyGroup>
+    <PackageId>TantivyDotNet</PackageId>
+    <Version>0.1.0-dev</Version>
+    <Authors>aminparsa18</Authors>
+    <Description>Fast embedded full-text search for .NET, powered by Tantivy (Rust). Schemas, on-disk and in-memory indexes, query parsing and query trees, snippets, facets, sorting and Elasticsearch-style aggregations. Native libraries for Windows, macOS and Linux are included.</Description>
+    <PackageTags>search;full-text-search;tantivy;lucene;index;fts</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageProjectUrl>https://github.com/aminparsa18/TantivyDotNet</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/aminparsa18/TantivyDotNet</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+
+  <!--
+    Native library.
+
+    Local builds run `cargo build` for the host (CargoBuild below) and copy the result next to the
+    assembly. CI builds each RID's library separately and passes the folder holding them as
+    NativeAssetsDir (one sub-folder per RID: native-assets/linux-x64/libtantivy_dotnet.so, ...) together
+    with SkipNativeBuild=true, so the pack job doesn't need Rust. NativeMethods.g.cs is committed, so
+    the managed code compiles without cargo.
+  -->
+  <PropertyGroup>
     <NativeDir>$(MSBuildThisFileDirectory)../../native/</NativeDir>
     <NativeProfile Condition="'$(Configuration)' == 'Release'">release</NativeProfile>
     <NativeProfile Condition="'$(NativeProfile)' == ''">debug</NativeProfile>
@@ -16,31 +49,59 @@
     <NativeLibName Condition="$([MSBuild]::IsOSPlatform('Windows'))">tantivy_dotnet.dll</NativeLibName>
     <NativeLibName Condition="$([MSBuild]::IsOSPlatform('OSX'))">libtantivy_dotnet.dylib</NativeLibName>
     <NativeLibName Condition="'$(NativeLibName)' == ''">libtantivy_dotnet.so</NativeLibName>
+    <HostNativeLib>$(NativeDir)target/$(NativeProfile)/$(NativeLibName)</HostNativeLib>
+    <!-- The RIDs a release package must contain; checked when RequireAllNativeAssets=true. -->
+    <PackageRids>osx-arm64;osx-x64;linux-x64;linux-arm64;win-x64</PackageRids>
   </PropertyGroup>
 
-  <!-- Literal (non-glob) paths, so these items exist at evaluation time even on a clean checkout,
-       before cargo has produced the files. CargoBuild runs first and creates them. -->
+  <!-- Literal (non-glob) path, so the item exists at evaluation time even on a clean checkout,
+       before cargo has produced the file. CargoBuild runs first and creates it. -->
   <ItemGroup>
     <Compile Remove="Native/NativeMethods.g.cs" />
     <Compile Include="Native/NativeMethods.g.cs" />
-    <None Include="$(NativeDir)target/$(NativeProfile)/$(NativeLibName)"
+    <None Include="$(HostNativeLib)"
+          Condition="'$(SkipNativeBuild)' != 'true'"
           Link="$(NativeLibName)"
-          CopyToOutputDirectory="PreserveNewest" />
+          CopyToOutputDirectory="PreserveNewest"
+          Pack="false" />
   </ItemGroup>
+
+  <!-- Package layout: runtimes/{rid}/native/<lib>. -->
+  <ItemGroup Condition="'$(NativeAssetsDir)' != ''">
+    <None Include="$([MSBuild]::EnsureTrailingSlash('$(NativeAssetsDir)'))*/*tantivy_dotnet.*"
+          Pack="true" PackagePath="runtimes/%(RecursiveDir)native/" Visible="false" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(NativeAssetsDir)' == '' and '$(SkipNativeBuild)' != 'true'">
+    <!-- A local `dotnet pack` contains only the host's library. -->
+    <None Include="$(HostNativeLib)" Pack="true"
+          PackagePath="runtimes/$(NETCoreSdkPortableRuntimeIdentifier)/native/" Visible="false" />
+  </ItemGroup>
+
+  <Target Name="CheckNativeAssets" BeforeTargets="GenerateNuspec" Condition="'$(RequireAllNativeAssets)' == 'true'">
+    <ItemGroup>
+      <_RequiredRid Include="$(PackageRids)" />
+      <_MissingRid Include="@(_RequiredRid)"
+                   Condition="!Exists('$([MSBuild]::EnsureTrailingSlash('$(NativeAssetsDir)'))%(Identity)')" />
+    </ItemGroup>
+    <Error Condition="'@(_MissingRid)' != ''"
+           Text="NativeAssetsDir '$(NativeAssetsDir)' has no native library for: @(_MissingRid)" />
+  </Target>
 
   <!-- cargo build also runs build.rs, which regenerates Native/NativeMethods.g.cs.
        Inputs/Outputs let MSBuild skip cargo entirely when no native source changed; if it does run
-       and cargo finds nothing to do, that's still a ~0.5s no-op. -->
+       and cargo finds nothing to do, that's still a ~0.5s no-op. With several target frameworks the
+       inner builds may each start cargo; cargo's lock on target/ serializes them and the second is a no-op. -->
   <ItemGroup>
-    <CargoInput Include="$(NativeDir)src/**/*.rs;$(NativeDir)build.rs;$(NativeDir)Cargo.toml;$(NativeDir)Cargo.lock" />
+    <CargoInput Include="$(NativeDir)src/**/*.rs;$(NativeDir)build.rs;$(NativeDir)Cargo.toml;$(NativeDir)Cargo.lock;$(NativeDir).cargo/config.toml" />
   </ItemGroup>
   <Target Name="CargoBuild" BeforeTargets="BeforeBuild"
+          Condition="'$(SkipNativeBuild)' != 'true'"
           Inputs="@(CargoInput)"
-          Outputs="$(NativeDir)target/$(NativeProfile)/$(NativeLibName);$(MSBuildThisFileDirectory)Native/NativeMethods.g.cs">
+          Outputs="$(HostNativeLib);$(MSBuildThisFileDirectory)Native/NativeMethods.g.cs">
     <Exec Command="cargo build $(CargoFlags)" WorkingDirectory="$(NativeDir)" />
     <!-- If cargo had nothing to rebuild (e.g. only Cargo.lock's mtime changed) it leaves the outputs
          untouched; touch them so the next MSBuild incremental check sees them as current. -->
-    <Touch Files="$(NativeDir)target/$(NativeProfile)/$(NativeLibName);$(MSBuildThisFileDirectory)Native/NativeMethods.g.cs" />
+    <Touch Files="$(HostNativeLib);$(MSBuildThisFileDirectory)Native/NativeMethods.g.cs" />
   </Target>
 
   <ItemGroup>

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A NativeAOT console app that consumes TantivyDotNet the way a user would. CI publishes it against
+       the packed package and runs it; a trim/AOT warning anywhere (ours or the library's) fails the publish. -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PublishAot>true</PublishAot>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Report each trim/AOT warning individually (including ones inside package assemblies). -->
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TantivyPackageVersion)' == ''">
+    <ProjectReference Include="../../src/TantivyDotNet/TantivyDotNet.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TantivyPackageVersion)' != ''">
+    <PackageReference Include="TantivyDotNet" Version="[$(TantivyPackageVersion)]" />
+  </ItemGroup>
+  <PropertyGroup Condition="'$(TantivyPackageVersion)' != ''">
+    <RestoreAdditionalProjectSources>$(TantivyPackageSource)</RestoreAdditionalProjectSources>
+  </PropertyGroup>
+
+</Project>

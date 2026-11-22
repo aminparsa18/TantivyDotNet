@@ -4,7 +4,25 @@ An idiomatic .NET binding for [Tantivy](https://github.com/quickwit-oss/tantivy)
 
 ## Status
 
-**Early development.** Schemas, in-memory and on-disk indexes, adding and deleting documents, commit and rollback, query strings and queries built in code, snippets, facets, sorting and aggregations all work. NuGet packaging and CI come next. Nothing is published on NuGet yet, and the API may still change.
+**Early development.** Schemas, in-memory and on-disk indexes, adding and deleting documents, commit and rollback, query strings and queries built in code, snippets, facets, sorting and aggregations all work. CI builds a NuGet package for every supported platform and tests it, including from a NativeAOT app. Nothing is published on NuGet yet, and the API may still change.
+
+## Installation
+
+Not on nuget.org yet. Once it is:
+
+```sh
+dotnet add package TantivyDotNet
+```
+
+One package covers every supported platform. It targets .NET 10 and .NET 11, and it carries the native Tantivy library for each runtime under `runtimes/{rid}/native/`:
+
+| RID | Notes |
+| --- | --- |
+| `win-x64` | C runtime linked statically, so no Visual C++ Redistributable is needed |
+| `linux-x64`, `linux-arm64` | glibc 2.17 or newer (RHEL 7, Ubuntu 16.04 and Debian 9 onward); not Alpine/musl |
+| `osx-x64`, `osx-arm64` | |
+
+The library is trimming- and NativeAOT-compatible (`IsAotCompatible`). Avoid the few overloads marked `[RequiresUnreferencedCode]`; each has an AOT-safe alternative.
 
 ## Usage
 
@@ -92,25 +110,45 @@ native/                     Rust cdylib wrapping Tantivy behind a small C ABI (e
   build.rs                  runs csbindgen, which generates src/TantivyDotNet/Native/NativeMethods.g.cs
 src/TantivyDotNet/          the .NET library: internal generated P/Invokes plus a hand-written public API
 tests/TantivyDotNet.Tests/  xUnit v3 tests
+tests/TantivyDotNet.AotSmoke/  NativeAOT console app that exercises the package end to end
+.github/workflows/ci.yml    native build per RID -> one package -> tests + AOT app on every platform
 ```
 
 - Each Rust object is an opaque handle wrapped in a `SafeHandle`. No raw pointers are exposed publicly.
 - Every export catches panics. Errors come back as status codes and turn into `TantivyException`.
 - Complex shapes cross the boundary as JSON: documents, schemas, and a single search request (query tree, paging, sort, snippets, facets, aggregations) that runs in one collector pass.
+- Every P/Invoke takes only blittable types, and the assembly sets `[DisableRuntimeMarshalling]`, so the calls need no marshalling stubs under NativeAOT.
 
 ## Building
 
 Prerequisites:
 
-- [.NET SDK 11](https://dotnet.microsoft.com/download) (pinned in `global.json`)
+- [.NET SDK 11](https://dotnet.microsoft.com/download) (pinned in `global.json`), plus the .NET 10 runtime to run the net10.0 tests
 - [Rust](https://rustup.rs) stable toolchain, with `cargo` on your `PATH`
 
 ```sh
-dotnet test --solution TantivyDotNet.slnx            # Debug
+dotnet test --solution TantivyDotNet.slnx            # Debug, on net10.0 and net11.0
 dotnet test --solution TantivyDotNet.slnx -c Release # Release (cargo --release, with LTO)
 ```
 
 The library project calls `cargo build` before compiling C#. That also regenerates `NativeMethods.g.cs` and copies the native library into the output folder. MSBuild skips the cargo step when no file under `native/` has changed, so incremental builds stay fast. The first Release build takes a few minutes because of LTO.
+
+### Packaging
+
+A local `dotnet pack src/TantivyDotNet -c Release` produces a package with only your machine's native library. CI builds the full package like this:
+
+1. Each RID's library is built on its own runner. Linux uses [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild) to target glibc 2.17, and the job fails if a newer glibc symbol slips in.
+2. One job packs the libraries with `-p:SkipNativeBuild=true -p:NativeAssetsDir=<dir with one sub-folder per RID> -p:RequireAllNativeAssets=true`.
+3. On each of the five platforms, the tests and the NativeAOT smoke app are built against the packed `.nupkg` (`-p:TantivyPackageVersion=<version> -p:TantivyPackageSource=<folder>`) and run.
+
+The package is uploaded as a workflow artifact. To try a local package the same way:
+
+```sh
+dotnet pack src/TantivyDotNet -c Release -o artifacts/packages -p:Version=0.1.0-local.1
+dotnet publish tests/TantivyDotNet.AotSmoke -c Release -r osx-arm64 -o artifacts/aot \
+  -p:TantivyPackageVersion=0.1.0-local.1 -p:TantivyPackageSource=$PWD/artifacts/packages
+./artifacts/aot/TantivyDotNet.AotSmoke
+```
 
 ## License
 

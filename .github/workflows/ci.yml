@@ -1,0 +1,187 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+
+jobs:
+  # 1. Build the Rust cdylib once per RID.
+  native:
+    name: native (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux is cross-compiled with cargo-zigbuild against glibc 2.17, so the library loads on
+          # any distro from RHEL 7 / Ubuntu 16.04 / Debian 9 on, not just the runner's glibc.
+          - { rid: linux-x64,   os: ubuntu-24.04,  target: x86_64-unknown-linux-gnu,  lib: libtantivy_dotnet.so,    glibc: '2.17' }
+          - { rid: linux-arm64, os: ubuntu-24.04,  target: aarch64-unknown-linux-gnu, lib: libtantivy_dotnet.so,    glibc: '2.17' }
+          - { rid: osx-arm64,   os: macos-15,      target: aarch64-apple-darwin,      lib: libtantivy_dotnet.dylib }
+          - { rid: osx-x64,     os: macos-15,      target: x86_64-apple-darwin,       lib: libtantivy_dotnet.dylib }
+          - { rid: win-x64,     os: windows-2025,  target: x86_64-pc-windows-msvc,    lib: tantivy_dotnet.dll }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          key: ${{ matrix.target }}
+
+      - name: Install cargo-zigbuild
+        if: matrix.glibc
+        run: |
+          python3 -m venv "$RUNNER_TEMP/zig"
+          "$RUNNER_TEMP/zig/bin/pip" install --quiet cargo-zigbuild==0.24.1 ziglang==0.17.1
+          # The venv's python3 must come first: cargo-zigbuild finds zig via `python3 -m ziglang`.
+          echo "$RUNNER_TEMP/zig/bin" >> "$GITHUB_PATH"
+
+      - name: Build
+        working-directory: native
+        run: |
+          if [ -n "${{ matrix.glibc }}" ]; then
+            cargo zigbuild --release --target ${{ matrix.target }}.${{ matrix.glibc }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+
+      - name: Check glibc symbol versions
+        if: matrix.glibc
+        run: |
+          max=$(objdump -T native/target/${{ matrix.target }}/release/${{ matrix.lib }} \
+                | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
+          echo "newest glibc symbol: $max"
+          if [ "$(printf '%s\n' "$max" "${{ matrix.glibc }}" | sort -V | tail -1)" != "${{ matrix.glibc }}" ]; then
+            echo "::error::library needs glibc $max, newer than the ${{ matrix.glibc }} baseline"
+            exit 1
+          fi
+
+      # build.rs regenerates the C# bindings on every build; the committed copy must match.
+      - name: Check NativeMethods.g.cs is up to date
+        run: git diff --exit-code -- src/TantivyDotNet/Native/NativeMethods.g.cs
+
+      - name: Stage
+        run: |
+          mkdir -p native-assets/${{ matrix.rid }}
+          cp native/target/${{ matrix.target }}/release/${{ matrix.lib }} native-assets/${{ matrix.rid }}/
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ matrix.rid }}
+          path: native-assets/
+          if-no-files-found: error
+
+  # 2. Pack one package holding every RID's library.
+  pack:
+    needs: native
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: native-*
+          path: native-assets
+          merge-multiple: true
+
+      - name: Version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.1.0-ci.${{ github.run_number }}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # SkipNativeBuild: no Rust here; the libraries come from the native jobs.
+      - name: Pack
+        run: >
+          dotnet pack src/TantivyDotNet -c Release -o artifacts/packages
+          -p:Version=${{ steps.version.outputs.version }}
+          -p:SkipNativeBuild=true
+          -p:NativeAssetsDir="$PWD/native-assets"
+          -p:RequireAllNativeAssets=true
+
+      - name: Package contents
+        run: unzip -l artifacts/packages/*.nupkg
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nupkg
+          path: artifacts/packages/*.nupkg
+          if-no-files-found: error
+
+  # 3. On every platform: run the test suite and a NativeAOT app against the packed package.
+  test:
+    name: test (${{ matrix.rid }})
+    needs: pack
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { rid: linux-x64,   os: ubuntu-24.04 }
+          - { rid: linux-arm64, os: ubuntu-24.04-arm }
+          - { rid: osx-arm64,   os: macos-15 }
+          - { rid: osx-x64,     os: macos-15-intel }
+          - { rid: win-x64,     os: windows-2025 }
+    defaults:
+      run:
+        shell: bash
+    env:
+      PACKAGE_PROPS: -p:TantivyPackageVersion=${{ needs.pack.outputs.version }} -p:TantivyPackageSource=${{ github.workspace }}/artifacts/packages
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          # 10.0 for the net10.0 test run; global.json picks the SDK that builds.
+          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: nupkg
+          path: artifacts/packages
+
+      - name: NativeAOT prerequisites
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang zlib1g-dev
+
+      - name: Test (net10.0, net11.0)
+        run: dotnet test --project tests/TantivyDotNet.Tests -c Release $PACKAGE_PROPS
+
+      - name: Publish NativeAOT smoke app
+        run: dotnet publish tests/TantivyDotNet.AotSmoke -c Release -r ${{ matrix.rid }} -o aot $PACKAGE_PROPS
+
+      - name: Run NativeAOT smoke app
+        run: ./aot/TantivyDotNet.AotSmoke
