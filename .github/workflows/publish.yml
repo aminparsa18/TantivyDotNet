@@ -17,6 +17,9 @@ jobs:
   publish:
     needs: ci
     runs-on: ubuntu-24.04
+    # Must match the Environment on the nuget.org trusted-publishing policy. Protection rules
+    # (e.g. required reviewers) can be added to it under Settings -> Environments.
+    environment: release
     permissions:
       contents: read
       id-token: write   # GitHub OIDC token, exchanged by NuGet/login for a short-lived API key
