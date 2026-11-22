@@ -52,6 +52,7 @@
     <HostNativeLib>$(NativeDir)target/$(NativeProfile)/$(NativeLibName)</HostNativeLib>
     <!-- The RIDs a release package must contain; checked when RequireAllNativeAssets=true. -->
     <PackageRids>osx-arm64;osx-x64;linux-x64;linux-arm64;win-x64</PackageRids>
+    <_NativeAssetsRoot Condition="'$(NativeAssetsDir)' != ''">$([MSBuild]::EnsureTrailingSlash($(NativeAssetsDir)))</_NativeAssetsRoot>
   </PropertyGroup>
 
   <!-- Literal (non-glob) path, so the item exists at evaluation time even on a clean checkout,
@@ -68,8 +69,8 @@
 
   <!-- Package layout: runtimes/{rid}/native/<lib>. -->
   <ItemGroup Condition="'$(NativeAssetsDir)' != ''">
-    <None Include="$([MSBuild]::EnsureTrailingSlash('$(NativeAssetsDir)'))*/*tantivy_dotnet.*"
-          Pack="true" PackagePath="runtimes/%(RecursiveDir)native/" Visible="false" />
+    <None Include="$(_NativeAssetsRoot)*/*tantivy_dotnet.*"
+          Pack="true" PackagePath="runtimes/%(RecursiveDir)native/%(Filename)%(Extension)" Visible="false" />
   </ItemGroup>
   <ItemGroup Condition="'$(NativeAssetsDir)' == '' and '$(SkipNativeBuild)' != 'true'">
     <!-- A local `dotnet pack` contains only the host's library. -->
@@ -81,7 +82,7 @@
     <ItemGroup>
       <_RequiredRid Include="$(PackageRids)" />
       <_MissingRid Include="@(_RequiredRid)"
-                   Condition="!Exists('$([MSBuild]::EnsureTrailingSlash('$(NativeAssetsDir)'))%(Identity)')" />
+                   Condition="!Exists('$(_NativeAssetsRoot)%(Identity)')" />
     </ItemGroup>
     <Error Condition="'@(_MissingRid)' != ''"
            Text="NativeAssetsDir '$(NativeAssetsDir)' has no native library for: @(_MissingRid)" />
