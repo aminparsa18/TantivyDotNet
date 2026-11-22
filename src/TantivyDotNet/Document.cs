@@ -68,6 +68,16 @@ public sealed class Document
     /// <summary>First value of a bytes field, or null if absent.</summary>
     public byte[]? GetBytes(string field) => First(field, JsonValueKind.String, "bytes")?.GetBytesFromBase64();
 
+    /// <summary>First value of an IP address field, or null if absent. IPv4 addresses come back as IPv4.</summary>
+    /// <exception cref="InvalidOperationException">The value isn't an IP address.</exception>
+    public System.Net.IPAddress? GetIpAddress(string field)
+    {
+        if (First(field, JsonValueKind.String, "IP address") is not { } v) return null;
+        return System.Net.IPAddress.TryParse(v.GetString(), out var ip)
+            ? ip
+            : throw new InvalidOperationException($"Field '{field}' holds '{v.GetString()}', which isn't an IP address.");
+    }
+
     /// <summary>The document as JSON: <c>{"field": [value, ...], ...}</c>.</summary>
     public string ToJson() => _root.GetRawText();
 

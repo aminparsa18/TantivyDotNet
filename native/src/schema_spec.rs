@@ -10,8 +10,8 @@
 
 use serde::{Deserialize, Serialize};
 use tantivy::schema::{
-    BytesOptions, DateOptions, FacetOptions, FieldType, IndexRecordOption, NumericOptions, Schema,
-    TextFieldIndexing, TextOptions,
+    BytesOptions, DateOptions, FacetOptions, FieldType, IndexRecordOption, IpAddrOptions, JsonObjectOptions,
+    NumericOptions, Schema, TextFieldIndexing, TextOptions,
 };
 
 use crate::analyzers::{self, Analyzers};
@@ -50,7 +50,7 @@ pub fn schema_from_json(json: &str) -> FfiResult<(Schema, Analyzers)> {
     let specs = &spec.fields;
     let used = specs
         .iter()
-        .filter(|f| f.kind == "text" && f.indexed)
+        .filter(|f| (f.kind == "text" || f.kind == "json") && f.indexed)
         .map(|f| (f.name.as_str(), f.tokenizer.as_deref().unwrap_or("default")));
     analyzers::validate(&spec.analyzers, used)?;
     if specs.is_empty() {
@@ -114,6 +114,37 @@ pub fn schema_from_json(json: &str) -> FfiResult<(Schema, Analyzers)> {
                 }
                 builder.add_facet_field(name, opts);
             }
+            "json" => {
+                let mut opts = JsonObjectOptions::default();
+                if spec.indexed {
+                    let tokenizer = spec.tokenizer.as_deref().unwrap_or("default");
+                    opts = opts.set_indexing_options(
+                        TextFieldIndexing::default()
+                            .set_tokenizer(tokenizer)
+                            .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+                    );
+                }
+                if spec.stored {
+                    opts = opts.set_stored();
+                }
+                if spec.fast {
+                    opts = opts.set_fast("raw");
+                }
+                builder.add_json_field(name, opts);
+            }
+            "ip" => {
+                let mut opts = IpAddrOptions::default();
+                if spec.stored {
+                    opts = opts.set_stored();
+                }
+                if spec.indexed {
+                    opts = opts.set_indexed();
+                }
+                if spec.fast {
+                    opts = opts.set_fast();
+                }
+                builder.add_ip_addr_field(name, opts);
+            }
             "bytes" => {
                 let mut opts = BytesOptions::default();
                 if spec.stored {
@@ -174,7 +205,10 @@ pub fn schema_to_json(schema: &Schema, analyzers: &Analyzers) -> String {
                 FieldType::Date(_) => ("date", None),
                 FieldType::Facet(_) => ("facet", None),
                 FieldType::Bytes(_) => ("bytes", None),
-                FieldType::JsonObject(_) => ("json", None),
+                FieldType::JsonObject(opts) => (
+                    "json",
+                    opts.get_text_indexing_options().map(|i| i.tokenizer().to_owned()),
+                ),
                 FieldType::IpAddr(_) => ("ip", None),
                 FieldType::Custom(_) => ("custom", None),
             };

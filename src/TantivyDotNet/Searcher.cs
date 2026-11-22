@@ -272,6 +272,7 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
             "bool" => p.Value.GetBoolean(),
             "date" => DateTimeOffset.UnixEpoch.AddTicks(p.Value.GetInt64() * TimeSpan.TicksPerMicrosecond),
             "bytes" => p.Value.EnumerateArray().Select(b => b.GetByte()).ToArray(),
+            "ip" => System.Net.IPAddress.Parse(p.Value.GetString()!),
             _ => throw new InvalidOperationException($"Unexpected sort value kind '{p.Name}'."),
         };
     }
@@ -296,7 +297,7 @@ public sealed record SearchHit(float Score, Document Document)
     /// <summary>
     /// When <see cref="SearchOptions.OrderBy"/> is set, the hit's value for each sort key, in order:
     /// a <see cref="string"/>, <see cref="ulong"/>, <see cref="long"/>, <see cref="double"/>,
-    /// <see cref="bool"/>, <see cref="DateTimeOffset"/> or <see cref="T:byte[]"/> for a field (null
+    /// <see cref="bool"/>, <see cref="DateTimeOffset"/>, <see cref="T:byte[]"/> or <see cref="System.Net.IPAddress"/> for a field (null
     /// if the document has none), or a <see cref="float"/> for <see cref="SortBy.Score"/>. Empty when
     /// sorted by relevance only.
     /// </summary>

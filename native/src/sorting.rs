@@ -4,12 +4,13 @@
 //!
 //! Request part: `"sort": [{"type": "field", "field": "year", "order": "desc"}, {"type": "score"}]`
 //! (absent or empty = by score), and `"search_after": {"keys": [...], "addr": [segment, doc]}`.
-//! Per hit: `"sort": [...]`, one tagged value per key (`{"score": f}`, `{"u64": n}`, `{"str": s}`,
+//! Per hit: `"sort": [...]`, one tagged value per key (`{"score": f}`, `{"u64": n}`, `{"str": s}`, `{"ip": s}`,
 //! dates as `{"date": unix_micros}`, ...) or `null` when the document has no value. Documents
 //! without a value come last in both orders; the document address breaks ties, so paging with a
 //! cursor is stable within one snapshot.
 
 use std::cmp::Ordering;
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::Arc;
 
 use serde::Deserialize;
@@ -110,6 +111,7 @@ enum Kind {
     Date,
     Str,
     Bytes,
+    Ip,
 }
 
 enum Source {
@@ -137,6 +139,7 @@ fn resolve(request: &SortKeyRequest, schema: &Schema) -> FfiResult<Key> {
         FieldType::Date(_) => Kind::Date,
         FieldType::Str(_) => Kind::Str,
         FieldType::Bytes(_) => Kind::Bytes,
+        FieldType::IpAddr(_) => Kind::Ip,
         _ => return Err(FfiError::invalid(format!("field '{name}' can't be sorted by: its type isn't supported"))),
     };
     if !entry.is_fast() {
@@ -160,6 +163,7 @@ pub enum KeyValue {
     Date(i64),
     Str(String),
     Bytes(Vec<u8>),
+    Ip(Ipv6Addr),
     Ord(u64),
 }
 
@@ -173,6 +177,7 @@ fn natural(a: &KeyValue, b: &KeyValue) -> Ordering {
         (Bool(x), Bool(y)) => x.cmp(y),
         (Str(x), Str(y)) => x.as_bytes().cmp(y.as_bytes()),
         (Bytes(x), Bytes(y)) => x.cmp(y),
+        (Ip(x), Ip(y)) => x.cmp(y),
         _ => Ordering::Equal, // never mixed within one key
     }
 }
@@ -207,6 +212,19 @@ fn tagged(value: &KeyValue) -> Value {
         KeyValue::Date(us) => json!({ "date": us }),
         KeyValue::Str(s) => json!({ "str": s }),
         KeyValue::Bytes(b) => json!({ "bytes": b }),
+        KeyValue::Ip(ip) => json!({ "ip": ip_text(ip) }),
+    }
+}
+
+/// IPv4-mapped addresses are shown as IPv4, like Tantivy's stored values.
+fn ip_text(ip: &Ipv6Addr) -> String {
+    ip.to_ipv4_mapped().map_or_else(|| ip.to_string(), |v4| v4.to_string())
+}
+
+fn parse_ip(text: &str) -> Option<Ipv6Addr> {
+    match text.parse::<IpAddr>().ok()? {
+        IpAddr::V4(v4) => Some(v4.to_ipv6_mapped()),
+        IpAddr::V6(v6) => Some(v6),
     }
 }
 
@@ -231,6 +249,7 @@ fn parse_cursor(after: &SearchAfter, keys: &[Key]) -> FfiResult<Cursor> {
                 (Source::Field { kind: Kind::Bool, .. }, "bool") => inner.as_bool().map(KeyValue::Bool),
                 (Source::Field { kind: Kind::Date, .. }, "date") => inner.as_i64().map(KeyValue::Date),
                 (Source::Field { kind: Kind::Str, .. }, "str") => inner.as_str().map(|s| KeyValue::Str(s.to_owned())),
+                (Source::Field { kind: Kind::Ip, .. }, "ip") => inner.as_str().and_then(parse_ip).map(KeyValue::Ip),
                 (Source::Field { kind: Kind::Bytes, .. }, "bytes") => inner
                     .as_array()
                     .and_then(|a| a.iter().map(|b| b.as_u64().and_then(|b| u8::try_from(b).ok())).collect::<Option<Vec<u8>>>())
@@ -416,6 +435,7 @@ enum KeyReader {
     Date(Option<Column<DateTime>>),
     Str(Option<StrColumn>),
     Bytes(Option<BytesColumn>),
+    Ip(Option<Column<Ipv6Addr>>),
 }
 
 impl KeyReader {
@@ -430,6 +450,7 @@ impl KeyReader {
             Kind::Date => Self::Date(ff.column_opt(name)?),
             Kind::Str => Self::Str(ff.str(name)?),
             Kind::Bytes => Self::Bytes(ff.bytes(name)?),
+            Kind::Ip => Self::Ip(ff.column_opt(name)?),
         })
     }
 
@@ -450,6 +471,7 @@ impl KeyReader {
             Self::Date(c) => first(c, doc).map(|d| KeyValue::Date(d.into_timestamp_micros())),
             Self::Str(c) => c.as_ref().and_then(|c| c.ords().first(doc)).map(KeyValue::Ord),
             Self::Bytes(c) => c.as_ref().and_then(|c| c.ords().first(doc)).map(KeyValue::Ord),
+            Self::Ip(c) => first(c, doc).map(KeyValue::Ip),
         };
         v.unwrap_or(KeyValue::Missing)
     }

@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 
@@ -32,6 +33,7 @@ public abstract class Query
 
     /// <summary>
     /// Matches documents whose <paramref name="field"/> contains exactly <paramref name="value"/>.
+    /// For a JSON field, <paramref name="field"/> is a path such as <c>attrs.color</c>.
     /// </summary>
     /// <remarks>
     /// The value is <b>not</b> analyzed: with the default tokenizer, text is indexed lowercased, so
@@ -68,6 +70,9 @@ public abstract class Query
 
     /// <inheritdoc cref="Term(string, string)" path="/summary"/>
     public static TermQuery Term(string field, ReadOnlySpan<byte> value) => new(field, value.ToArray());
+
+    /// <summary>Matches documents whose IP address <paramref name="field"/> equals <paramref name="value"/> (IPv4 also matches its IPv4-mapped IPv6 form).</summary>
+    public static TermQuery Term(string field, IPAddress value) => new(field, NotNull(value));
 
     /// <summary>
     /// Matches documents in the facet category <paramref name="path"/> or any category below it:
@@ -156,6 +161,11 @@ public abstract class Query
     public static RangeQuery Range(string field, DateTime? lower, DateTime? upper, bool includeLower = true, bool includeUpper = true) =>
         RangeOf(field, lower is { } l ? ToOffset(l) : null, upper is { } u ? ToOffset(u) : null, includeLower, includeUpper);
 
+    /// <inheritdoc cref="Range(string, long?, long?, bool, bool)"/>
+    /// <remarks>For an IP address field. IPv4 bounds compare as IPv4-mapped IPv6, so an IPv4 range doesn't include IPv6 addresses.</remarks>
+    public static RangeQuery Range(string field, IPAddress? lower, IPAddress? upper, bool includeLower = true, bool includeUpper = true) =>
+        RangeOf(field, lower, upper, includeLower, includeUpper);
+
     /// <summary>
     /// Matches terms of a text <paramref name="field"/> that sort between the bounds (ordinal,
     /// byte-wise). Mostly useful on string fields. A null bound is open.
@@ -214,6 +224,9 @@ public abstract class Query
 
     /// <inheritdoc cref="TermSet(string, IEnumerable{string})"/>
     public static TermSetQuery TermSet(string field, IEnumerable<long> values) => TermSetOf(field, values);
+
+    /// <inheritdoc cref="TermSet(string, IEnumerable{string})"/>
+    public static TermSetQuery TermSet(string field, IEnumerable<IPAddress> values) => TermSetOf(field, values);
 
     /// <summary>
     /// Matches documents matching any of <paramref name="queries"/>, scored by the best-scoring one
@@ -373,6 +386,7 @@ public abstract class Query
                 break;
             case bool b: w.WriteBoolean("bool", b); break;
             case DateTimeOffset dto: w.WriteNumber("date", (dto.UtcTicks - DateTime.UnixEpoch.Ticks) / TimeSpan.TicksPerMicrosecond); break;
+            case IPAddress ip: w.WriteString("ip", ip.ToString()); break;
             case byte[] bytes:
                 w.WriteStartArray("bytes");
                 foreach (byte x in bytes) w.WriteNumberValue(x);
@@ -409,7 +423,7 @@ public sealed class TermQuery : Query
     /// <summary>The field searched.</summary>
     public string Field { get; }
 
-    /// <summary>The value: a <see cref="string"/>, <see cref="ulong"/>, <see cref="long"/>, <see cref="double"/>, <see cref="bool"/>, <see cref="DateTimeOffset"/> or <see cref="T:byte[]"/>.</summary>
+    /// <summary>The value: a <see cref="string"/>, <see cref="ulong"/>, <see cref="long"/>, <see cref="double"/>, <see cref="bool"/>, <see cref="DateTimeOffset"/>, <see cref="T:byte[]"/> or <see cref="IPAddress"/>.</summary>
     public object Value { get; }
 
     internal override void WriteJson(Utf8JsonWriter w)

@@ -143,6 +143,8 @@ pub enum ValueSpec {
     Bytes(Vec<u8>),
     /// A facet path; only valid on facet fields (unlike `Str`, which also is).
     Facet(String),
+    /// An IPv4 or IPv6 address in text form.
+    Ip(String),
 }
 
 #[derive(Deserialize)]
@@ -164,9 +166,8 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
         QuerySpec::All => Box::new(AllQuery),
 
         QuerySpec::Term { field, value } => {
-            let (f, ft) = indexed_field(&schema, field)?;
-            let term = make_term(f, field, ft, value)?;
-            Box::new(TermQuery::new(term, record_option(ft)))
+            let target = term_target(&schema, field)?;
+            Box::new(TermQuery::new(target.term(field, value)?, target.record_option()))
         }
 
         QuerySpec::Fuzzy { field, value, distance, transpositions, prefix } => {
@@ -227,7 +228,9 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
         }
 
         QuerySpec::Range { field, lower, upper } => {
-            let f = schema.get_field(field)?;
+            let (f, path) = schema
+                .find_field(field)
+                .ok_or_else(|| FfiError::invalid(format!("unknown field '{field}'")))?;
             let entry = schema.get_field_entry(f);
             if !entry.is_indexed() && !entry.is_fast() {
                 return Err(FfiError::invalid(format!(
@@ -242,7 +245,13 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
                 Ok(match b {
                     None => Bound::Unbounded,
                     Some(b) => {
-                        let term = make_term(f, field, ft, &b.value)?;
+                        let term = match ft {
+                            FieldType::JsonObject(o) => {
+                                Target::Json { field: f, path: path.to_owned(), expand_dots: o.is_expand_dots_enabled() }
+                                    .term(field, &b.value)?
+                            }
+                            _ => make_term(f, field, ft, &b.value)?,
+                        };
                         if b.inclusive { Bound::Included(term) } else { Bound::Excluded(term) }
                     }
                 })
@@ -276,8 +285,8 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
         }
 
         QuerySpec::TermSet { field, values } => {
-            let (f, ft) = indexed_field(&schema, field)?;
-            let terms = values.iter().map(|v| make_term(f, field, ft, v)).collect::<FfiResult<Vec<_>>>()?;
+            let target = term_target(&schema, field)?;
+            let terms = values.iter().map(|v| target.term(field, v)).collect::<FfiResult<Vec<_>>>()?;
             Box::new(TermSetQuery::new(terms))
         }
 
@@ -362,10 +371,7 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
 /// The term of a `{"type":"term",...}` spec, for the writer's delete/update-by-term operations.
 pub fn term_of(spec: &QuerySpec, schema: &Schema) -> FfiResult<Term> {
     match spec {
-        QuerySpec::Term { field, value } => {
-            let (f, ft) = indexed_field(schema, field)?;
-            make_term(f, field, ft, value)
-        }
+        QuerySpec::Term { field, value } => term_target(schema, field)?.term(field, value),
         _ => Err(FfiError::invalid("expected a term query")),
     }
 }
@@ -401,6 +407,77 @@ fn require_text(name: &str, ft: &FieldType, what: &str) -> FfiResult<()> {
     }
 }
 
+/// What a term query's field name refers to: a whole field, or a path inside a JSON field
+/// (`attrs.color`, found with `Schema::find_field`).
+enum Target<'a> {
+    Plain(Field, &'a FieldType),
+    Json { field: Field, path: String, expand_dots: bool },
+}
+
+fn term_target<'a>(schema: &'a Schema, name: &str) -> FfiResult<Target<'a>> {
+    let (field, path) = schema
+        .find_field(name)
+        .ok_or_else(|| FfiError::invalid(format!("unknown field '{name}'")))?;
+    let entry = schema.get_field_entry(field);
+    if !entry.is_indexed() {
+        return Err(FfiError::invalid(format!("field '{}' is not indexed", entry.name())));
+    }
+    match entry.field_type() {
+        FieldType::JsonObject(o) => {
+            if path.is_empty() {
+                return Err(FfiError::invalid(format!(
+                    "'{name}' is a JSON field: query a path inside it, like '{name}.key'"
+                )));
+            }
+            Ok(Target::Json { field, path: path.to_owned(), expand_dots: o.is_expand_dots_enabled() })
+        }
+        ft => Ok(Target::Plain(field, ft)),
+    }
+}
+
+impl Target<'_> {
+    fn term(&self, name: &str, value: &ValueSpec) -> FfiResult<Term> {
+        match self {
+            Target::Plain(f, ft) => make_term(*f, name, ft, value),
+            Target::Json { field, path, expand_dots } => {
+                use tantivy::columnar::NumericalValue as N;
+                let mut term = Term::from_field_json_path(*field, path, *expand_dots);
+                // Numbers are normalized as Tantivy does when indexing JSON (i64 when it fits).
+                let number = match value {
+                    ValueSpec::U64(n) => Some(N::U64(*n)),
+                    ValueSpec::I64(n) => Some(N::I64(*n)),
+                    ValueSpec::F64(x) => Some(N::F64(*x)),
+                    _ => None,
+                };
+                match (value, number.map(N::normalize)) {
+                    (_, Some(N::I64(v))) => term.append_type_and_fast_value(v),
+                    (_, Some(N::U64(v))) => term.append_type_and_fast_value(v),
+                    (_, Some(N::F64(v))) => term.append_type_and_fast_value(v),
+                    (ValueSpec::Str(s), _) => term.append_type_and_str(s),
+                    (ValueSpec::Bool(b), _) => term.append_type_and_fast_value(*b),
+                    (ValueSpec::Date(us), _) => term.append_type_and_fast_value(
+                        DateTime::from_timestamp_micros(*us).truncate(tantivy::schema::DATE_TIME_PRECISION_INDEXED),
+                    ),
+                    (other, _) => {
+                        return Err(FfiError::invalid(format!(
+                            "a path in JSON field '{name}' can't be queried with {}",
+                            value_name(other)
+                        )))
+                    }
+                }
+                Ok(term)
+            }
+        }
+    }
+
+    fn record_option(&self) -> IndexRecordOption {
+        match self {
+            Target::Plain(_, ft) => record_option(ft),
+            Target::Json { .. } => IndexRecordOption::WithFreqs,
+        }
+    }
+}
+
 /// Text fields are scored with term frequencies; other indexed fields only record presence.
 fn record_option(ft: &FieldType) -> IndexRecordOption {
     match ft {
@@ -426,6 +503,15 @@ fn make_term(field: Field, name: &str, ft: &FieldType, value: &ValueSpec) -> Ffi
             Term::from_field_date_for_search(field, DateTime::from_timestamp_micros(*us))
         }
         (FieldType::Bytes(_), V::Bytes(b)) => Term::from_field_bytes(field, b),
+        (FieldType::IpAddr(_), V::Ip(s)) => {
+            let ip: std::net::IpAddr =
+                s.parse().map_err(|_| FfiError::invalid(format!("'{s}' is not an IP address")))?;
+            let v6 = match ip {
+                std::net::IpAddr::V4(v4) => v4.to_ipv6_mapped(),
+                std::net::IpAddr::V6(v6) => v6,
+            };
+            Term::from_field_ip_addr(field, v6)
+        }
         (FieldType::Facet(_), V::Str(s) | V::Facet(s)) => Term::from_facet(field, &crate::facets::parse_facet(s)?),
         _ => {
             return Err(FfiError::invalid(format!(
@@ -448,6 +534,8 @@ fn type_name(ft: &FieldType) -> &'static str {
         FieldType::Date(_) => "a date field",
         FieldType::Bytes(_) => "a bytes field",
         FieldType::Facet(_) => "a facet field",
+        FieldType::IpAddr(_) => "an IP address field",
+        FieldType::JsonObject(_) => "a JSON field",
         _ => "a field type that is not supported here",
     }
 }
@@ -462,5 +550,6 @@ fn value_name(v: &ValueSpec) -> String {
         ValueSpec::Date(_) => "a date".into(),
         ValueSpec::Bytes(_) => "bytes".into(),
         ValueSpec::Facet(p) => format!("the facet path '{p}'"),
+        ValueSpec::Ip(ip) => format!("the IP address {ip}"),
     }
 }

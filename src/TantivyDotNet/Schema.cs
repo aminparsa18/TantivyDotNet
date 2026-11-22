@@ -22,9 +22,9 @@ public enum FieldType
     Bytes,
     /// <summary>Hierarchical category path such as <c>/genre/fiction</c>; see <see cref="SchemaBuilder.AddFacetField"/>.</summary>
     Facet,
-    /// <summary>Dynamic JSON object. Not yet creatable from .NET.</summary>
+    /// <summary>Schemaless JSON object; see <see cref="SchemaBuilder.AddJsonField"/>.</summary>
     Json,
-    /// <summary>IP address. Not yet creatable from .NET.</summary>
+    /// <summary>IPv4 or IPv6 address; see <see cref="SchemaBuilder.AddIpAddressField"/>.</summary>
     IpAddr,
     /// <summary>A field type this version of TantivyDotNet doesn't know.</summary>
     Other,
@@ -36,7 +36,7 @@ public enum FieldType
 /// <param name="Stored">Whether the original value is stored and returned in search hits.</param>
 /// <param name="Indexed">Whether the field is searchable.</param>
 /// <param name="Fast">Whether the field has a columnar "fast field" (used for sorting and aggregations).</param>
-/// <param name="Tokenizer">For indexed text fields, the tokenizer name (for example <c>default</c> or <c>raw</c>); otherwise null.</param>
+/// <param name="Tokenizer">For indexed text and JSON fields, the tokenizer name (for example <c>default</c> or <c>raw</c>); otherwise null.</param>
 public sealed record FieldDefinition(string Name, FieldType Type, bool Stored, bool Indexed, bool Fast, string? Tokenizer);
 
 /// <summary>
@@ -138,6 +138,8 @@ public sealed class Schema
         FieldType.Date => "date",
         FieldType.Bytes => "bytes",
         FieldType.Facet => "facet",
+        FieldType.Json => "json",
+        FieldType.IpAddr => "ip",
         _ => throw new NotSupportedException($"Creating {type} fields isn't supported yet."),
     };
 
@@ -266,6 +268,31 @@ public sealed class SchemaBuilder
     /// <param name="stored">Return the paths in search hits.</param>
     public SchemaBuilder AddFacetField(string name, bool stored = false) =>
         Add(new FieldDefinition(name, FieldType.Facet, stored, Indexed: true, Fast: true, null));
+
+    /// <summary>
+    /// Adds a JSON field: each document can put any JSON object in it, without declaring the keys.
+    /// Query a key by its path: <c>Query.Term("attrs.color", "red")</c>, <c>Query.Range("attrs.size", 2L, 5L)</c>,
+    /// or <c>attrs.color:red</c> in parsed queries. Strings are tokenized with <paramref name="tokenizer"/>;
+    /// numbers, booleans and RFC 3339 dates keep their type.
+    /// </summary>
+    /// <param name="name">Field name.</param>
+    /// <param name="stored">Return the object in search hits.</param>
+    /// <param name="fast">Also store values as fast fields (strings untokenized), for range queries, <see cref="Query.Exists"/> and aggregations on paths like <c>attrs.price</c>.</param>
+    /// <param name="tokenizer">The tokenizer for string values; see <see cref="AddTextField"/>.</param>
+    public SchemaBuilder AddJsonField(string name, bool stored = false, bool fast = false, string tokenizer = "default")
+    {
+        ArgumentException.ThrowIfNullOrEmpty(tokenizer);
+        return Add(new FieldDefinition(name, FieldType.Json, stored, Indexed: true, fast, tokenizer));
+    }
+
+    /// <inheritdoc cref="AddU64Field" path="/param"/>
+    /// <summary>
+    /// Adds an IP address field. In JSON documents, values are strings like <c>192.168.0.1</c> or
+    /// <c>2001:db8::1</c>; IPv4 addresses are stored as IPv4-mapped IPv6 and returned as IPv4.
+    /// Query with <see cref="Query.Term(string, System.Net.IPAddress)"/> and ranges.
+    /// </summary>
+    public SchemaBuilder AddIpAddressField(string name, bool stored = false, bool indexed = true, bool fast = false) =>
+        Add(new FieldDefinition(name, FieldType.IpAddr, stored, indexed, fast, null));
 
     /// <summary>Creates the schema. The builder can keep being used afterwards.</summary>
     /// <exception cref="InvalidOperationException">No fields were added, or a text field uses a tokenizer that is neither built in nor added with <see cref="AddAnalyzer"/>.</exception>
