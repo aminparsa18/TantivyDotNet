@@ -46,9 +46,6 @@ struct SearchRequest {
     aggregations: Option<serde_json::Value>,
 }
 
-/// The largest `limit + offset`: the number of document ids in a segment.
-const MAX_WINDOW: usize = u32::MAX as usize;
-
 fn default_limit() -> usize {
     10
 }
@@ -83,16 +80,19 @@ pub fn run(searcher: &Searcher, index: &Index, request_json: &str) -> FfiResult<
     let query = query_spec::build(&request.query, index)?;
     let only_fields = request.fields.as_deref().map(|names| stored_fields(&schema, names)).transpose()?;
 
-    // Bounded so the collectors' `limit + offset` can't overflow; no index holds more documents.
-    if request.limit.checked_add(request.offset).is_none_or(|k| k > MAX_WINDOW) {
-        return Err(FfiError::invalid(format!(
-            "limit + offset must be at most {MAX_WINDOW}, got {} + {}",
-            request.limit, request.offset
-        )));
-    }
+    // No page can hold more than the snapshot's documents. Clamping matters: Tantivy's `TopDocs`
+    // reserves `2 * (limit + offset)` entries per segment up front, so `Limit = int.MaxValue`
+    // ("everything") would otherwise ask for tens of GB, and a failed allocation aborts the
+    // process. It also keeps `limit + offset` from overflowing.
+    let max_doc: usize = searcher.segment_readers().iter().map(|s| s.max_doc() as usize).sum();
+    let limit = request.limit.min(max_doc.saturating_sub(request.offset));
     let top_plan = match request.limit {
         0 => None,
-        limit => Some(sorting::plan(&request.sort, request.search_after.as_ref(), limit, request.offset, &schema)?),
+        // Planned (and so validated) even when the page turns out empty.
+        _ => {
+            let plan = sorting::plan(&request.sort, request.search_after.as_ref(), limit, request.offset, &schema)?;
+            (limit > 0).then_some(plan)
+        }
     };
 
     let (count, top, facets, aggregations) = if request.facets.is_none() && request.aggregations.is_none() {

@@ -1195,10 +1195,14 @@ mod tests {
             assert_eq!(hits(&none).len(), 0);
             assert_eq!(none["count"].as_u64().unwrap() as usize, reference.len());
         }
-        for (limit, offset) in [(u64::MAX, 0), (u64::MAX, u64::MAX), (1, u64::MAX), (u32::MAX as u64, 1)] {
-            let e = f.search(&format!(r#"{{"query":{ALL},"limit":{limit},"offset":{offset}}}"#)).err().unwrap();
-            assert!(e.message.contains("limit + offset must be at most"), "{}", e.message);
+        // Clamped to the snapshot, so even values .NET can't send neither overflow nor fail.
+        for (limit, offset, expected) in [(u64::MAX, 0, reference.len()), (u64::MAX, u64::MAX, 0), (1, u64::MAX, 0)] {
+            let r = f.search(&format!(r#"{{"query":{ALL},"limit":{limit},"offset":{offset}}}"#)).unwrap();
+            assert_eq!(hits(&r).len(), expected);
         }
+        // An empty page still validates the sort.
+        let e = f.search(&format!(r#"{{"query":{ALL},"offset":100000,"sort":[{{"type":"field","field":"body"}}]}}"#));
+        assert!(e.err().unwrap().message.contains("isn't a fast field"));
         // limit 0 only counts, whatever the offset.
         let count = f.search(&format!(r#"{{"query":{ALL},"limit":0,"offset":{}}}"#, u32::MAX)).unwrap();
         assert_eq!(count["count"].as_u64().unwrap() as usize, reference.len());

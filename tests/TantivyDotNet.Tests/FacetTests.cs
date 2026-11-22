@@ -41,6 +41,23 @@ public class FacetTests
     }
 
     [Fact]
+    public void FacetCounts_RootWithOneLetterOrSimilarNames()
+    {
+        // Tantivy's own collector miscounts these at the root (counted per leaf / merged).
+        var schema = new SchemaBuilder().AddFacetField("c").Build();
+        using var index = SearchIndex.CreateInRam(schema);
+        using (var writer = index.CreateWriter())
+        {
+            foreach (var c in new[] { "/a/x", "/a/y", "/a/y", "/bat/1", "/cat/2" })
+                writer.AddDocument($$"""{"c": "{{c}}"}""");
+            writer.Commit();
+        }
+        using var searcher = index.CreateSearcher();
+        var root = searcher.Search(Query.All, new SearchOptions { Facets = [new FacetRequest("c")] });
+        Assert.Equal([("/a", 3L), ("/bat", 1L), ("/cat", 1L)], Counts(root, "c"));
+    }
+
+    [Fact]
     public void FacetCounts_CoverAllMatches_NotJustThePage()
     {
         using var index = Library();
