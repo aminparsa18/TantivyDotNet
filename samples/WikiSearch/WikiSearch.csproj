@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- Sample: a small Wikipedia search site on TantivyDotNet. See README.md. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- The whole app is trimming- and NativeAOT-safe: `dotnet publish -r <rid>` gives one native binary. -->
+    <PublishAot>true</PublishAot>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/TantivyDotNet/TantivyDotNet.csproj" />
+  </ItemGroup>
+
+</Project>

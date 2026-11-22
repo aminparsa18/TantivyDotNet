@@ -6,4 +6,10 @@
     <Project Path="tests/TantivyDotNet.Tests/TantivyDotNet.Tests.csproj" />
     <Project Path="tests/TantivyDotNet.AotSmoke/TantivyDotNet.AotSmoke.csproj" />
   </Folder>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/TantivyDotNet.Benchmarks/TantivyDotNet.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/WikiSearch/WikiSearch.csproj" />
+  </Folder>
 </Solution>

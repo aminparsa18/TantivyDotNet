@@ -93,7 +93,10 @@ namespace TantivyDotNet.Native
         internal static extern int tdn_writer_rollback(TdnWriter* writer, TdnString* err);
 
         /// <summary>
-        ///  Drops the writer without committing; uncommitted operations are discarded.
+        ///  Frees the writer without committing; uncommitted operations are discarded. Blocks until
+        ///  background merges finish (`wait_merging_threads`), like Lucene's `IndexWriter.Dispose()`; a plain
+        ///  drop would kill them, wasting their work and leaving orphan files until the next commit.
+        ///  Errors from the merge threads are ignored: what they would have merged is still committed.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_writer_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void tdn_writer_free(TdnWriter* writer);

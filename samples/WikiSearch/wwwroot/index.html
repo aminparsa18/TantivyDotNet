@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WikiSearch</title>
+<style>
+  :root { --bg: #fff; --fg: #1d1d1f; --muted: #6e6e73; --line: #e3e3e8; --accent: #2557d6; --mark: #fff1a8; --chip: #f2f2f5; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151517; --fg: #ececf0; --muted: #9a9aa2; --line: #2c2c31; --accent: #7aa2ff; --mark: #5b4b00; --chip: #232327; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 system-ui, -apple-system, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 16px; }
+  h1 span { color: var(--muted); font-weight: 400; font-size: 15px; }
+  form { display: flex; gap: 8px; }
+  input[type=search] { flex: 1; min-width: 0; padding: 10px 12px; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+  select, button { font: inherit; color: inherit; background: var(--chip); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; cursor: pointer; }
+  .hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; }
+  .hint code { background: var(--chip); padding: 0 4px; border-radius: 4px; }
+  .meta { color: var(--muted); font-size: 14px; margin: 20px 0 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .chip { font-size: 13px; padding: 4px 10px; border-radius: 999px; }
+  .chip.on { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+  .hit { padding: 14px 0; border-top: 1px solid var(--line); }
+  .hit a { color: var(--accent); font-size: 18px; text-decoration: none; }
+  .hit a:hover { text-decoration: underline; }
+  .hit p { margin: 4px 0 0; overflow-wrap: anywhere; }
+  .hit small { color: var(--muted); }
+  mark { background: var(--mark); color: inherit; padding: 0 1px; border-radius: 2px; }
+  .error { color: #d33; }
+  .pager { display: flex; justify-content: space-between; margin-top: 16px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>WikiSearch <span>· Wikipedia abstracts on TantivyDotNet</span></h1>
+  <form id="form">
+    <input id="q" type="search" placeholder="Search…" autofocus autocomplete="off">
+    <select id="sort" aria-label="Sort">
+      <option value="relevance">Relevance</option>
+      <option value="links">Most linked</option>
+    </select>
+  </form>
+  <p class="hint">Try <code>"solar system"</code>, <code>jazz AND -rock</code>, <code>title:river</code>, <code>"albert einstein"~2</code>, <code>einstien</code></p>
+  <div id="out"></div>
+</main>
+<script>
+  const state = { q: "", sort: "relevance", page: 1, bucket: null };
+  const $ = id => document.getElementById(id);
+  const fmt = n => n.toLocaleString("en-US");
+  const esc = s => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const label = b => b.from == null ? `< ${fmt(b.to)} links` : b.to == null ? `${fmt(b.from)}+ links` : `${fmt(b.from)}–${fmt(b.to)} links`;
+  let timer, seq = 0;
+
+  async function search() {
+    const p = new URLSearchParams({ q: state.q, sort: state.sort, page: state.page });
+    if (state.bucket?.from != null) p.set("minLinks", state.bucket.from);
+    if (state.bucket?.to != null) p.set("maxLinks", state.bucket.to);
+    const mine = ++seq;
+    const res = await fetch("/api/search?" + p);
+    const data = await res.json();
+    if (mine !== seq) return;            // a newer request is in flight
+    if (!res.ok) { $("out").innerHTML = `<p class="meta error">${esc(data.error)}</p>`; return; }
+
+    const chips = data.popularity.map((b, i) => {
+      const on = state.bucket && state.bucket.from === b.from && state.bucket.to === b.to;
+      return `<button class="chip${on ? " on" : ""}" data-i="${i}">${label(b)} · ${fmt(b.count)}</button>`;
+    }).join("");
+    const hits = data.hits.map(h => `
+      <div class="hit">
+        <a href="${esc(h.url)}" target="_blank" rel="noopener">${esc(h.title)}</a>
+        <p>${h.snippetHtml}</p>
+        <small>${fmt(h.links)} incoming links${h.score != null ? ` · score ${h.score.toFixed(2)}` : ""}</small>
+      </div>`).join("");
+    const pages = Math.ceil(data.total / 10);
+    $("out").innerHTML = `
+      <p class="meta">${fmt(data.total)} results in ${data.tookMs.toFixed(1)} ms${data.fuzzy ? " · no exact matches, showing close spellings" : ""}</p>
+      <div class="chips">${chips}</div>
+      ${hits}
+      <div class="pager">
+        <button id="prev" ${state.page <= 1 ? "disabled" : ""}>← Previous</button>
+        <span class="meta">Page ${state.page} of ${fmt(Math.max(pages, 1))}</span>
+        <button id="next" ${state.page >= pages ? "disabled" : ""}>Next →</button>
+      </div>`;
+    $("out").querySelectorAll(".chip").forEach(c => c.onclick = () => {
+      const b = data.popularity[+c.dataset.i];
+      const on = state.bucket && state.bucket.from === b.from && state.bucket.to === b.to;
+      state.bucket = on ? null : { from: b.from, to: b.to };
+      state.page = 1; search();
+    });
+    $("prev").onclick = () => { state.page--; search(); scrollTo(0, 0); };
+    $("next").onclick = () => { state.page++; search(); scrollTo(0, 0); };
+  }
+
+  $("q").oninput = () => { clearTimeout(timer); timer = setTimeout(() => { state.q = $("q").value; state.page = 1; search(); }, 150); };
+  $("sort").onchange = () => { state.sort = $("sort").value; state.page = 1; search(); };
+  $("form").onsubmit = e => { e.preventDefault(); state.q = $("q").value; state.page = 1; search(); };
+  search();
+</script>
+</body>
+</html>

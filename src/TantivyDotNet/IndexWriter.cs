@@ -124,6 +124,11 @@ public sealed unsafe class IndexWriter : IDisposable
     /// <summary>
     /// Releases the writer and its index lock <b>without committing</b>. Safe to call more than once.
     /// </summary>
+    /// <remarks>
+    /// Blocks until background segment merges started by earlier commits have finished, as Lucene's
+    /// <c>IndexWriter.Dispose()</c> does, so their work isn't lost. After a large commit this can take
+    /// a while.
+    /// </remarks>
     public void Dispose() => _handle.Dispose();
 
     private void AddDocumentUtf8(ReadOnlySpan<byte> json)

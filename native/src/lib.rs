@@ -318,10 +318,20 @@ pub unsafe extern "C" fn tdn_writer_rollback(writer: *const TdnWriter, err: *mut
     })
 }
 
-/// Drops the writer without committing; uncommitted operations are discarded.
+/// Frees the writer without committing; uncommitted operations are discarded. Blocks until
+/// background merges finish (`wait_merging_threads`), like Lucene's `IndexWriter.Dispose()`; a plain
+/// drop would kill them, wasting their work and leaving orphan files until the next commit.
+/// Errors from the merge threads are ignored: what they would have merged is still committed.
 #[no_mangle]
 pub unsafe extern "C" fn tdn_writer_free(writer: *mut TdnWriter) {
-    ffi::free_box(writer);
+    if writer.is_null() {
+        return;
+    }
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let writer = Box::from_raw(writer);
+        let inner = writer.writer.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _ = inner.wait_merging_threads();
+    }));
 }
 
 // ---------------------------------------------------------------------------------------------

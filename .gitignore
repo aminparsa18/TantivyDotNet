@@ -10,3 +10,6 @@ TestResults/
 
 # Local Claude Code session prompt (not published)
 PROMPT.md
+
+# BenchmarkDotNet output
+BenchmarkDotNet.Artifacts/
