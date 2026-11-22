@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TantivyDotNet/TantivyDotNet.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TantivyDotNet.Tests/TantivyDotNet.Tests.csproj" />
+  </Folder>
+</Solution>

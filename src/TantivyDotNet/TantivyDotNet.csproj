@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- csbindgen emits `unsafe` extern declarations -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <NativeDir>$(MSBuildThisFileDirectory)../../native/</NativeDir>
+    <NativeProfile Condition="'$(Configuration)' == 'Release'">release</NativeProfile>
+    <NativeProfile Condition="'$(NativeProfile)' == ''">debug</NativeProfile>
+    <CargoFlags Condition="'$(NativeProfile)' == 'release'">--release</CargoFlags>
+    <NativeLibName Condition="$([MSBuild]::IsOSPlatform('Windows'))">tantivy_dotnet.dll</NativeLibName>
+    <NativeLibName Condition="$([MSBuild]::IsOSPlatform('OSX'))">libtantivy_dotnet.dylib</NativeLibName>
+    <NativeLibName Condition="'$(NativeLibName)' == ''">libtantivy_dotnet.so</NativeLibName>
+  </PropertyGroup>
+
+  <!-- Literal (non-glob) paths, so these items exist at evaluation time even on a clean checkout,
+       before cargo has produced the files. CargoBuild runs first and creates them. -->
+  <ItemGroup>
+    <Compile Remove="Native/NativeMethods.g.cs" />
+    <Compile Include="Native/NativeMethods.g.cs" />
+    <None Include="$(NativeDir)target/$(NativeProfile)/$(NativeLibName)"
+          Link="$(NativeLibName)"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- cargo build also runs build.rs, which regenerates Native/NativeMethods.g.cs.
+       Inputs/Outputs let MSBuild skip cargo entirely when no native source changed; if it does run
+       and cargo finds nothing to do, that's still a ~0.5s no-op. -->
+  <ItemGroup>
+    <CargoInput Include="$(NativeDir)src/**/*.rs;$(NativeDir)build.rs;$(NativeDir)Cargo.toml;$(NativeDir)Cargo.lock" />
+  </ItemGroup>
+  <Target Name="CargoBuild" BeforeTargets="BeforeBuild"
+          Inputs="@(CargoInput)"
+          Outputs="$(NativeDir)target/$(NativeProfile)/$(NativeLibName);$(MSBuildThisFileDirectory)Native/NativeMethods.g.cs">
+    <Exec Command="cargo build $(CargoFlags)" WorkingDirectory="$(NativeDir)" />
+    <!-- If cargo had nothing to rebuild (e.g. only Cargo.lock's mtime changed) it leaves the outputs
+         untouched; touch them so the next MSBuild incremental check sees them as current. -->
+    <Touch Files="$(NativeDir)target/$(NativeProfile)/$(NativeLibName);$(MSBuildThisFileDirectory)Native/NativeMethods.g.cs" />
+  </Target>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="TantivyDotNet.Tests" />
+  </ItemGroup>
+
+</Project>

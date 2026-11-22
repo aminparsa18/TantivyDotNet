@@ -1,0 +1,9 @@
+native/target/
+bin/
+obj/
+artifacts/
+TestResults/
+.vs/
+.idea/
+*.user
+.DS_Store
