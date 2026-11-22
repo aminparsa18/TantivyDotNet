@@ -18,10 +18,11 @@ use std::ops::Bound;
 
 use serde::Deserialize;
 use tantivy::query::{
-    AllQuery, BooleanQuery, BoostQuery, EmptyQuery, FuzzyTermQuery, Occur, PhraseQuery, Query,
-    QueryParser, RangeQuery, TermQuery,
+    AllQuery, BooleanQuery, BoostQuery, ConstScoreQuery, DisjunctionMaxQuery, EmptyQuery, ExistsQuery,
+    FuzzyTermQuery, MoreLikeThisQuery, Occur, PhraseQuery, Query, QueryParser, RangeQuery, RegexQuery,
+    TermQuery, TermSetQuery,
 };
-use tantivy::schema::{Field, FieldType, IndexRecordOption, Schema};
+use tantivy::schema::{Field, FieldType, IndexRecordOption, OwnedValue, Schema};
 use tantivy::{DateTime, Index, Term};
 
 use crate::ffi::{self, FfiError, FfiResult};
@@ -66,6 +67,32 @@ pub enum QuerySpec {
         query: Box<QuerySpec>,
         factor: f32,
     },
+    Regex {
+        field: String,
+        pattern: String,
+    },
+    Exists {
+        field: String,
+    },
+    TermSet {
+        field: String,
+        values: Vec<ValueSpec>,
+    },
+    DisjunctionMax {
+        queries: Vec<QuerySpec>,
+        #[serde(default)]
+        tie_breaker: f32,
+    },
+    ConstScore {
+        query: Box<QuerySpec>,
+        score: f32,
+    },
+    MoreLikeThis {
+        /// Field name -> JSON values, like a document (`{"body": ["text"], "year": [1937]}`).
+        document: serde_json::Map<String, serde_json::Value>,
+        #[serde(default)]
+        options: MoreLikeThisSpec,
+    },
     Parse {
         text: String,
         default_fields: Option<Vec<String>>,
@@ -80,6 +107,18 @@ pub enum QuerySpec {
         #[serde(default)]
         lenient: bool,
     },
+}
+
+#[derive(Deserialize, Default)]
+pub struct MoreLikeThisSpec {
+    min_doc_frequency: Option<u64>,
+    max_doc_frequency: Option<u64>,
+    min_term_frequency: Option<usize>,
+    max_query_terms: Option<usize>,
+    min_word_length: Option<usize>,
+    max_word_length: Option<usize>,
+    boost_factor: Option<f32>,
+    stop_words: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -216,6 +255,73 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
                 return Err(FfiError::invalid(format!("boost factor must be finite, got {factor}")));
             }
             Box::new(BoostQuery::new(build(query, index)?, *factor))
+        }
+
+        QuerySpec::Regex { field, pattern } => {
+            let (f, ft) = indexed_field(&schema, field)?;
+            require_text(field, ft, "regex")?;
+            Box::new(RegexQuery::from_pattern(pattern, f).map_err(|e| FfiError::invalid(format!("invalid regex: {e}")))?)
+        }
+
+        QuerySpec::Exists { field } => {
+            let (f, _) = schema
+                .find_field(field)
+                .ok_or_else(|| FfiError::invalid(format!("unknown field '{field}'")))?;
+            if !schema.get_field_entry(f).is_fast() {
+                return Err(FfiError::invalid(format!(
+                    "field '{field}' isn't a fast field, so an exists query can't check it (create it with fast: true)"
+                )));
+            }
+            Box::new(ExistsQuery::new(field.clone(), true))
+        }
+
+        QuerySpec::TermSet { field, values } => {
+            let (f, ft) = indexed_field(&schema, field)?;
+            let terms = values.iter().map(|v| make_term(f, field, ft, v)).collect::<FfiResult<Vec<_>>>()?;
+            Box::new(TermSetQuery::new(terms))
+        }
+
+        QuerySpec::DisjunctionMax { queries, tie_breaker } => {
+            if !tie_breaker.is_finite() || *tie_breaker < 0.0 || *tie_breaker > 1.0 {
+                return Err(FfiError::invalid(format!("tie breaker must be between 0 and 1, got {tie_breaker}")));
+            }
+            let disjuncts = queries.iter().map(|q| build(q, index)).collect::<FfiResult<Vec<_>>>()?;
+            Box::new(DisjunctionMaxQuery::with_tie_breaker(disjuncts, *tie_breaker))
+        }
+
+        QuerySpec::ConstScore { query, score } => {
+            if !score.is_finite() {
+                return Err(FfiError::invalid(format!("constant score must be finite, got {score}")));
+            }
+            Box::new(ConstScoreQuery::new(build(query, index)?, *score))
+        }
+
+        QuerySpec::MoreLikeThis { document, options } => {
+            let mut fields = Vec::with_capacity(document.len());
+            for (name, json) in document {
+                let field = schema.get_field(name)?;
+                let ft = schema.get_field_entry(field).field_type();
+                let items = match json {
+                    serde_json::Value::Array(items) => items.clone(),
+                    other => vec![other.clone()],
+                };
+                let values = items
+                    .into_iter()
+                    .map(|v| ft.value_from_json(v).map_err(|e| FfiError::invalid(format!("field '{name}': {e}"))))
+                    .collect::<FfiResult<Vec<OwnedValue>>>()?;
+                fields.push((field, values));
+            }
+            let o = options;
+            let mut b = MoreLikeThisQuery::builder();
+            if let Some(v) = o.min_doc_frequency { b = b.with_min_doc_frequency(v); }
+            if let Some(v) = o.max_doc_frequency { b = b.with_max_doc_frequency(v); }
+            if let Some(v) = o.min_term_frequency { b = b.with_min_term_frequency(v); }
+            if let Some(v) = o.max_query_terms { b = b.with_max_query_terms(v); }
+            if let Some(v) = o.min_word_length { b = b.with_min_word_length(v); }
+            if let Some(v) = o.max_word_length { b = b.with_max_word_length(v); }
+            if let Some(v) = o.boost_factor { b = b.with_boost_factor(v); }
+            if let Some(v) = &o.stop_words { b = b.with_stop_words(v.clone()); }
+            Box::new(b.with_document_fields(fields))
         }
 
         QuerySpec::Parse { text, default_fields, conjunction, boosts, fuzzy, lenient } => {

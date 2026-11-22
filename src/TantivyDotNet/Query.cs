@@ -187,6 +187,95 @@ public abstract class Query
         return new ParsedQuery(NotNull(text), options);
     }
 
+    /// <summary>
+    /// Matches documents with a term of the text <paramref name="field"/> that matches
+    /// <paramref name="pattern"/> as a whole (Rust <c>regex</c> syntax, anchored at both ends):
+    /// <c>Regex("title", "gr.*s")</c> matches the term <c>grapes</c>. Terms are the indexed,
+    /// analyzed tokens (lowercase with the default tokenizer).
+    /// </summary>
+    /// <remarks>An invalid pattern throws <see cref="TantivyException"/> with <see cref="TantivyErrorCode.InvalidArgument"/> when the query runs. All matches score the same.</remarks>
+    public static RegexQuery Regex(string field, string pattern) => new(NotNull(field), NotNull(pattern));
+
+    /// <summary>
+    /// Matches documents that have at least one value in <paramref name="field"/>, which must be a
+    /// fast field (<c>fast: true</c>). All matches score the same.
+    /// </summary>
+    public static ExistsQuery Exists(string field) => new(NotNull(field));
+
+    /// <summary>
+    /// Matches documents whose <paramref name="field"/> contains any of <paramref name="values"/>
+    /// exactly. Faster than an OR of many <see cref="Term(string, string)"/> queries; all matches
+    /// score the same. Values aren't analyzed.
+    /// </summary>
+    public static TermSetQuery TermSet(string field, IEnumerable<string> values) => TermSetOf(field, values);
+
+    /// <inheritdoc cref="TermSet(string, IEnumerable{string})"/>
+    public static TermSetQuery TermSet(string field, IEnumerable<ulong> values) => TermSetOf(field, values);
+
+    /// <inheritdoc cref="TermSet(string, IEnumerable{string})"/>
+    public static TermSetQuery TermSet(string field, IEnumerable<long> values) => TermSetOf(field, values);
+
+    /// <summary>
+    /// Matches documents matching any of <paramref name="queries"/>, scored by the best-scoring one
+    /// plus <paramref name="tieBreaker"/> times the scores of the others. Use it to search the same
+    /// words in several fields without rewarding documents that repeat them everywhere.
+    /// </summary>
+    /// <param name="queries">The alternatives.</param>
+    /// <param name="tieBreaker">Weight of the non-best scores, 0 (the default: only the best counts) to 1 (a plain sum).</param>
+    public static DisjunctionMaxQuery DisjunctionMax(IEnumerable<Query> queries, float tieBreaker = 0)
+    {
+        if (!(tieBreaker >= 0 && tieBreaker <= 1)) throw new ArgumentOutOfRangeException(nameof(tieBreaker), tieBreaker, "Tie breaker must be between 0 and 1.");
+        return new DisjunctionMaxQuery(Clauses(NotNull(queries), nameof(queries)), tieBreaker);
+    }
+
+    /// <summary>
+    /// Matches documents similar to <paramref name="document"/>: its most distinctive terms (by
+    /// TF-IDF, in text, numeric, date and facet fields) become a query. Typically
+    /// <c>hit.Document</c>, which holds only stored fields. Exclude the document itself with
+    /// <c>&amp; !Query.Term("id", ...)</c>.
+    /// </summary>
+    /// <param name="document">The example document's fields.</param>
+    /// <param name="options">Term selection settings, or null for Tantivy's defaults.</param>
+    /// <remarks>Fails when it runs if the document has no fields.</remarks>
+    public static MoreLikeThisQuery MoreLikeThis(Document document, MoreLikeThisOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(document);
+        return new MoreLikeThisQuery(document.Root.GetRawText(), options ?? MoreLikeThisOptions.Default);
+    }
+
+    /// <summary>
+    /// Matches documents similar to the given text per field, for example a draft that isn't indexed:
+    /// <c>MoreLikeThis(new Dictionary&lt;string, string&gt; { ["body"] = draft })</c>.
+    /// </summary>
+    /// <param name="fieldTexts">Field name to text; the text is analyzed with the field's tokenizer.</param>
+    /// <param name="options">Term selection settings, or null for Tantivy's defaults.</param>
+    public static MoreLikeThisQuery MoreLikeThis(IReadOnlyDictionary<string, string> fieldTexts, MoreLikeThisOptions? options = null)
+    {
+        ArgumentNullException.ThrowIfNull(fieldTexts);
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var w = new Utf8JsonWriter(buffer))
+        {
+            w.WriteStartObject();
+            foreach (var (field, text) in fieldTexts)
+            {
+                if (text is null) throw new ArgumentException($"Text for field '{field}' can't be null.", nameof(fieldTexts));
+                w.WriteString(field, text);
+            }
+            w.WriteEndObject();
+        }
+        return new MoreLikeThisQuery(Encoding.UTF8.GetString(buffer.WrittenSpan), options ?? MoreLikeThisOptions.Default);
+    }
+
+    /// <summary>
+    /// Gives every document this query matches the same <paramref name="score"/>, for filters
+    /// that shouldn't affect ranking, or to rank by clause rather than by term statistics.
+    /// </summary>
+    public ConstantScoreQuery ConstantScore(float score = 1)
+    {
+        if (!float.IsFinite(score)) throw new ArgumentOutOfRangeException(nameof(score), score, "Score must be finite.");
+        return new ConstantScoreQuery(this, score);
+    }
+
     /// <summary>Multiplies this query's scores by <paramref name="factor"/>, to weight it within a <see cref="Boolean"/>.</summary>
     public BoostQuery Boost(float factor)
     {
@@ -241,6 +330,15 @@ public abstract class Query
         if (lower is null && upper is null)
             throw new ArgumentException("A range needs at least one bound. Use Query.All to match everything.");
         return new RangeQuery(field, lower, upper, includeLower, includeUpper);
+    }
+
+    private static TermSetQuery TermSetOf<T>(string field, IEnumerable<T> values) where T : notnull
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ArgumentNullException.ThrowIfNull(values);
+        object[] array = [.. values.Select(v => (object)v)];
+        if (Array.IndexOf(array, null) >= 0) throw new ArgumentException("Values can't be null.", nameof(values));
+        return new TermSetQuery(field, array);
     }
 
     private static Query[] Clauses(IEnumerable<Query>? clauses, string paramName)
@@ -530,6 +628,155 @@ public sealed class BoostQuery : Query
         w.WritePropertyName("query");
         Query.WriteJson(w);
         w.WriteNumber("factor", Factor);
+        w.WriteEndObject();
+    }
+}
+
+/// <summary>A regular-expression term match. Created by <see cref="Query.Regex"/>.</summary>
+public sealed class RegexQuery : Query
+{
+    internal RegexQuery(string field, string pattern)
+    {
+        Field = field;
+        Pattern = pattern;
+    }
+
+    /// <summary>The field searched.</summary>
+    public string Field { get; }
+
+    /// <summary>The pattern terms must match.</summary>
+    public string Pattern { get; }
+
+    internal override void WriteJson(Utf8JsonWriter w)
+    {
+        w.WriteStartObject();
+        w.WriteString("type", "regex");
+        w.WriteString("field", Field);
+        w.WriteString("pattern", Pattern);
+        w.WriteEndObject();
+    }
+}
+
+/// <summary>A has-a-value match. Created by <see cref="Query.Exists"/>.</summary>
+public sealed class ExistsQuery : Query
+{
+    internal ExistsQuery(string field) => Field = field;
+
+    /// <summary>The fast field checked.</summary>
+    public string Field { get; }
+
+    internal override void WriteJson(Utf8JsonWriter w)
+    {
+        w.WriteStartObject();
+        w.WriteString("type", "exists");
+        w.WriteString("field", Field);
+        w.WriteEndObject();
+    }
+}
+
+/// <summary>An any-of-these-terms match. Created by <see cref="Query.TermSet(string, IEnumerable{string})"/> and its overloads.</summary>
+public sealed class TermSetQuery : Query
+{
+    internal TermSetQuery(string field, object[] values)
+    {
+        Field = field;
+        Values = values;
+    }
+
+    /// <summary>The field searched.</summary>
+    public string Field { get; }
+
+    /// <summary>The values; see <see cref="TermQuery.Value"/>.</summary>
+    public IReadOnlyList<object> Values { get; }
+
+    internal override void WriteJson(Utf8JsonWriter w)
+    {
+        w.WriteStartObject();
+        w.WriteString("type", "term_set");
+        w.WriteString("field", Field);
+        w.WriteStartArray("values");
+        foreach (var v in Values) WriteValue(w, v);
+        w.WriteEndArray();
+        w.WriteEndObject();
+    }
+}
+
+/// <summary>A best-of-alternatives match. Created by <see cref="Query.DisjunctionMax"/>.</summary>
+public sealed class DisjunctionMaxQuery : Query
+{
+    internal DisjunctionMaxQuery(Query[] queries, float tieBreaker)
+    {
+        Queries = queries;
+        TieBreaker = tieBreaker;
+    }
+
+    /// <summary>The alternatives.</summary>
+    public IReadOnlyList<Query> Queries { get; }
+
+    /// <summary>Weight of the non-best scores.</summary>
+    public float TieBreaker { get; }
+
+    internal override void WriteJson(Utf8JsonWriter w)
+    {
+        w.WriteStartObject();
+        w.WriteString("type", "disjunction_max");
+        w.WriteStartArray("queries");
+        foreach (var q in Queries) q.WriteJson(w);
+        w.WriteEndArray();
+        w.WriteNumber("tie_breaker", TieBreaker);
+        w.WriteEndObject();
+    }
+}
+
+/// <summary>A query whose matches all get one score. Created by <see cref="Query.ConstantScore"/>.</summary>
+public sealed class ConstantScoreQuery : Query
+{
+    internal ConstantScoreQuery(Query query, float score)
+    {
+        Query = query;
+        Score = score;
+    }
+
+    /// <summary>The wrapped query.</summary>
+    public Query Query { get; }
+
+    /// <summary>The score every match gets.</summary>
+    public float Score { get; }
+
+    internal override void WriteJson(Utf8JsonWriter w)
+    {
+        w.WriteStartObject();
+        w.WriteString("type", "const_score");
+        w.WritePropertyName("query");
+        Query.WriteJson(w);
+        w.WriteNumber("score", Score);
+        w.WriteEndObject();
+    }
+}
+
+/// <summary>A similar-documents match. Created by <see cref="Query.MoreLikeThis(Document, MoreLikeThisOptions?)"/>.</summary>
+public sealed class MoreLikeThisQuery : Query
+{
+    private readonly string _documentJson;
+
+    internal MoreLikeThisQuery(string documentJson, MoreLikeThisOptions options)
+    {
+        _documentJson = documentJson;
+        Options = options;
+    }
+
+    /// <summary>The term selection settings.</summary>
+    public MoreLikeThisOptions Options { get; }
+
+    internal override void WriteJson(Utf8JsonWriter w)
+    {
+        w.WriteStartObject();
+        w.WriteString("type", "more_like_this");
+        w.WritePropertyName("document");
+        w.WriteRawValue(_documentJson, skipInputValidation: true);
+        w.WriteStartObject("options");
+        Options.WriteJson(w);
+        w.WriteEndObject();
         w.WriteEndObject();
     }
 }

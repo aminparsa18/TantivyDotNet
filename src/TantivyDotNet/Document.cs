@@ -13,6 +13,8 @@ public sealed class Document
 
     internal Document(JsonElement root) => _root = root;
 
+    internal JsonElement Root => _root;
+
     /// <summary>Names of the fields present in this document.</summary>
     public IEnumerable<string> FieldNames => _root.EnumerateObject().Select(p => p.Name);
 
