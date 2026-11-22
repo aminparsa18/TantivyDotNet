@@ -3,7 +3,7 @@ namespace TantivyDotNet.Tests;
 public class AnalyzerTests
 {
     private static readonly Analyzer English =
-        Analyzer.Simple().LowerCase().AsciiFolding().StopWords(Language.English).Stem(Language.English).RemoveLong(40);
+        Analyzer.Simple().LowerCase().AsciiFolding().StopWords(AnalyzerLanguage.English).Stem(AnalyzerLanguage.English).RemoveLong(40);
 
     private static Schema ArticleSchema() => new SchemaBuilder()
         .AddAnalyzer("en_text", English)
@@ -115,7 +115,7 @@ public class AnalyzerTests
         Assert.Equal(TantivyErrorCode.InvalidArgument, e.Code);
         Assert.Contains("analyzer 'r'", e.Message);
 
-        var noStopList = new SchemaBuilder().AddAnalyzer("tr", Analyzer.Simple().StopWords(Language.Turkish)).AddTextField("t").Build();
+        var noStopList = new SchemaBuilder().AddAnalyzer("tr", Analyzer.Simple().StopWords(AnalyzerLanguage.Turkish)).AddTextField("t").Build();
         Assert.Contains("stop-word", Assert.Throws<TantivyException>(() => SearchIndex.CreateInRam(noStopList)).Message);
     }
 

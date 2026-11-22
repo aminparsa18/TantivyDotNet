@@ -91,7 +91,7 @@ public class FieldTypeTests
         var h1 = searcher.Search(Query.Term("id", "h1"))[0].Document;
         Assert.Equal(IPAddress.Parse("192.168.0.1"), h1.GetIpAddress("ip"));
         Assert.Throws<TantivyException>(() => searcher.Search(Query.Term("ip", "10.0.0.5")));
-        Assert.Equal(new FieldDefinition("ip", FieldType.IpAddr, Stored: true, Indexed: true, Fast: true, null), index.Schema["ip"]);
+        Assert.Equal(new FieldDefinition("ip", FieldType.IpAddress, Stored: true, Indexed: true, Fast: true, null), index.Schema["ip"]);
     }
 
     [Fact]

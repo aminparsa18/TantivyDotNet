@@ -4,7 +4,7 @@ An idiomatic .NET binding for [Tantivy](https://github.com/quickwit-oss/tantivy)
 
 ## Status
 
-**Early development.** Schemas, in-memory and on-disk indexes, adding and deleting documents, commit and rollback, query strings and queries built in code, snippets, facets, sorting and aggregations all work. CI builds a NuGet package for every supported platform and tests it, including from a NativeAOT app. Preview releases are [on nuget.org](https://www.nuget.org/packages/TantivyDotNet); the API may still change before 1.0.
+**Early development.** Schemas (including JSON and IP address fields), custom analyzers, in-memory and on-disk indexes, adding, updating and deleting documents, commit and rollback, query strings and queries built in code, snippets, facets, multi-key sorting with cursor paging, aggregations and score explanations all work. CI builds a NuGet package for every supported platform and tests it, including from a NativeAOT app. Preview releases are [on nuget.org](https://www.nuget.org/packages/TantivyDotNet); the API may still change before 1.0.
 
 ## Installation
 
@@ -40,7 +40,8 @@ using (var writer = index.CreateWriter(heapBytes: 50_000_000))
 {
     writer.AddDocument(new { id = "b1", title = "Of Mice and Men", body = "...", year = 1937 });
     writer.AddDocument("""{"id": "b2", "title": "The Pearl", "year": 1947}""");   // raw JSON works too
-    writer.DeleteTerm("id", "old-id");
+    writer.UpdateDocument(Query.Term("id", "b2"), """{"id": "b2", "title": "The Pearl (2nd ed.)", "year": 1947}""");
+    writer.DeleteTerm("id", "old-id");           // or DeleteDocuments(anyQuery)
     writer.Commit();                             // Dispose without Commit discards changes
 }
 
@@ -61,21 +62,41 @@ var query = Query.Phrase("body", "of mice", slop: 1)            // analyzed with
 var results = searcher.Search(query);
 ```
 
-Beyond a limit and offset, a search takes `SearchOptions` for ordering, snippets and facet counts:
+Other query types: `Query.Regex`, `Query.Exists` (fast fields), `Query.TermSet`, `Query.DisjunctionMax`, `query.ConstantScore()` and `Query.MoreLikeThis(hit.Document)`. For text typed by users, parse with options:
+
+```csharp
+var parser = new QueryParserOptions
+{
+    DefaultFields = ["title", "body"],
+    DefaultOperator = QueryOperator.And,                         // "a b" means a AND b
+    FieldBoosts = new Dictionary<string, float> { ["title"] = 3 },
+    FuzzyFields = new Dictionary<string, FuzzyOptions> { ["body"] = new(distance: 1) },
+    Lenient = true,                                              // drop what doesn't parse instead of throwing
+};
+var userResults = searcher.Search(Query.Parse(userInput, parser));
+Console.WriteLine(searcher.Explain(query, results[0]));          // how the score was computed
+```
+
+Beyond a limit and offset, a search takes `SearchOptions` for ordering, returned fields, snippets, facet counts and aggregations:
 
 ```csharp
 var results = searcher.Search(query, new SearchOptions
 {
     Limit = 20,
     Offset = 40,
-    OrderBy = SortBy.Field("year", descending: true),       // a fast field; null = by relevance
+    OrderBy = [SortBy.Field("year", descending: true), SortBy.Score()],   // fast fields and/or score; null = by relevance
+    Fields = ["title"],                                      // stored fields to return; null = all
     Snippets = new SnippetOptions("body") { MaxLength = 200 },
     Facets = [new FacetRequest("genre", "/fiction") { Top = 5 }],
     Aggregations = """{"by_decade": {"histogram": {"field": "year", "interval": 10}}}""",
 });
 ```
 
-- **Sorting** works on one fast field (`fast: true`) of any type except facets. Documents without a value come last, and `hit.SortValue` holds the value sorted by. Relevance isn't computed, so `hit.Score` is `NaN`.
+- **Sorting** takes one or more keys: fast fields (`fast: true`) of any type except facets and JSON, and `SortBy.Score()`. Documents without a value come last, and `hit.SortValues` holds the values sorted by. Unless the score is a key, relevance isn't computed, so `hit.Score` is `NaN`.
+- **Deep paging.** `Offset` gets slower as it grows. Instead, pass the last hit's `Cursor` as `SearchAfter` (with the same `OrderBy`) to get the next page:
+  ```csharp
+  var next = searcher.Search(query, new SearchOptions { Limit = 20, OrderBy = order, SearchAfter = results[^1].Cursor });
+  ```
 - **Snippets** highlight matches in stored text fields:
   ```csharp
   Snippet s = results[0].Snippets["body"];
@@ -93,13 +114,26 @@ var results = searcher.Search(query, new SearchOptions
   var typed = results.GetAggregations(MyJsonContext.Default.MyAggs);   // AOT-safe; GetAggregations<T>() uses reflection
   ```
 
+**Analyzers.** Text fields use a built-in tokenizer (`default`, `raw`, `en_stem`, `whitespace`) or a custom analyzer defined in the schema. An index created in a directory saves its analyzers, and `SearchIndex.Open` restores them. `index.Analyze("en_text", "Running cafés")` shows the terms produced.
+
+```csharp
+var schema = new SchemaBuilder()
+    .AddAnalyzer("en_text", Analyzer.Simple().LowerCase().AsciiFolding()
+        .StopWords(AnalyzerLanguage.English).Stem(AnalyzerLanguage.English))
+    .AddAnalyzer("prefix", Analyzer.NGram(1, 10, prefixOnly: true).LowerCase())   // search-as-you-type
+    .AddTextField("body", tokenizer: "en_text")
+    .AddJsonField("attrs", stored: true, fast: true)   // schemaless: Query.Term("attrs.color", "red")
+    .AddIpAddressField("ip", fast: true)               // Query.Range("ip", IPAddress.Parse("10.0.0.0"), ...)
+    .Build();
+```
+
 Some behavior to know about:
 
 - **Thread safety.** `SearchIndex` and `Searcher` are thread-safe, so share one searcher across threads. `IndexWriter` is not thread-safe; use it from one thread at a time (it already indexes on several threads internally). Only one writer can be open per index at a time.
 - **Searchers are snapshots.** A searcher doesn't see commits made after it was created. Create a new one to see them; creating one is cheap.
 - **Trimming and NativeAOT.** `AddDocument(object)` uses reflection-based System.Text.Json and is annotated with `[RequiresUnreferencedCode]`. In trimmed or AOT apps, use `AddDocument(doc, MyJsonContext.Default.MyType)` or pass JSON strings instead.
 - **Errors.** Native errors throw `TantivyException`, whose `Code` property tells you the category. Query syntax errors throw `QueryParseException`. Using an object after it has been disposed throws `ObjectDisposedException`.
-- **Documents.** Field values are matched to schema fields by name, and unknown fields are ignored. Dates must be RFC 3339 strings with an offset, so use `DateTimeOffset` or UTC `DateTime`.
+- **Documents.** Field values are matched to schema fields by name, case-sensitively. A property that isn't a schema field throws `TantivyException` (so `new { Title = ... }` doesn't silently miss a `title` field); create the writer with `new IndexWriterOptions { IgnoreUnknownFields = true }` to drop such properties instead. Dates must be RFC 3339 strings with an offset, so use `DateTimeOffset` or UTC `DateTime`.
 
 ## Performance
 

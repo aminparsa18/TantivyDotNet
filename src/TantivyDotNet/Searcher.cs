@@ -285,11 +285,24 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
     }
 }
 
-/// <summary>One search hit.</summary>
-/// <param name="Score">Relevance score (BM25); higher is better. <see cref="float.NaN"/> when sorted by a field (<see cref="SortBy"/>), since scoring is skipped.</param>
-/// <param name="Document">The hit's stored fields.</param>
-public sealed record SearchHit(float Score, Document Document)
+/// <summary>One search hit, from <see cref="SearchResults"/>.</summary>
+public sealed class SearchHit
 {
+    internal SearchHit(float score, Document document)
+    {
+        Score = score;
+        Document = document;
+    }
+
+    /// <summary>
+    /// Relevance score (BM25); higher is better. <see cref="float.NaN"/> when sorted by fields only
+    /// (<see cref="SearchOptions.OrderBy"/> without <see cref="SortBy.Score"/>), since scoring is skipped.
+    /// </summary>
+    public float Score { get; }
+
+    /// <summary>The hit's stored fields (or those selected by <see cref="SearchOptions.Fields"/>).</summary>
+    public Document Document { get; }
+
     internal static readonly IReadOnlyDictionary<string, Snippet> NoSnippets = new Dictionary<string, Snippet>();
 
     internal static readonly IReadOnlyList<object?> NoSortValues = [];

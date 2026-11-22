@@ -16,15 +16,18 @@ Directory.CreateDirectory(dir);
 try
 {
     var schema = new SchemaBuilder()
-        .AddStringField("id", stored: true)
+        .AddAnalyzer("en", Analyzer.Simple().LowerCase().StopWords(AnalyzerLanguage.English).Stem(AnalyzerLanguage.English))
+        .AddStringField("id", stored: true, fast: true)
         .AddTextField("title", stored: true)
-        .AddTextField("body", stored: true)
+        .AddTextField("body", stored: true, tokenizer: "en")
+        .AddJsonField("attrs", stored: true, fast: true)
+        .AddIpAddressField("ip", stored: true, fast: true)
         .AddU64Field("year", stored: true, fast: true)
         .AddFacetField("genre", stored: true)
         .Build();
 
     using (var index = SearchIndex.Create(dir, schema))
-    using (var writer = index.CreateWriter(heapBytes: 20_000_000))
+    using (var writer = index.CreateWriter(new IndexWriterOptions { HeapBytes = 20_000_000 }))
     {
         writer.AddDocument(new Book("b1", "Of Mice and Men", "Two drifters dream of a farm with rabbits.", 1937, "/fiction/novella"),
                            SmokeJson.Default.Book);
@@ -33,6 +36,18 @@ try
         writer.AddDocument("""{"id": "b3", "title": "Cannery Row", "body": "Mack and the boys throw a party.", "year": 1945, "genre": "/fiction/novel"}""");
         writer.AddDocument("""{"id": "old", "title": "Draft", "body": "to be deleted", "year": 1900, "genre": "/draft"}""");
         writer.DeleteTerm("id", "old");
+        writer.AddDocument("""{"id": "tmp", "title": "Temp", "body": "x", "year": 1800, "genre": "/draft"}""");
+        writer.DeleteDocuments(Query.Range("year", null, 1850L));
+        writer.UpdateDocument(Query.Term("id", "b3"), """{"id": "b3", "title": "Cannery Row", "body": "Mack and the boys throw parties.", "year": 1945, "genre": "/fiction/novel", "attrs": {"pages": 185}, "ip": "10.0.0.3"}""");
+        try
+        {
+            writer.AddDocument("""{"id": "x", "Title": "wrong case"}""");
+            Check(false, "unknown field is rejected");
+        }
+        catch (TantivyException)
+        {
+            Check(true, "unknown field is rejected");
+        }
         writer.Commit();
     }
 
@@ -62,6 +77,24 @@ try
 
     var phrase = searcher.Search(Query.Phrase("body", "dust bowl"), new SearchOptions { Snippets = new SnippetOptions("body") });
     Check(phrase.Count == 1 && phrase[0].Snippets["body"].ToHtml().Contains("<b>dust</b>"), "phrase query with snippet");
+
+    Check(reopened.Analyze("en", "The parties") is ["parti"], "persisted analyzer restored by Open");
+    Check(searcher.Count("body:party") == 1, "custom analyzer stems at query time");
+    Check(searcher.Count(Query.Term("attrs.pages", 185L)) == 1, "JSON path term query");
+    Check(searcher.Count(Query.Term("ip", System.Net.IPAddress.Parse("10.0.0.3"))) == 1, "IP term query");
+    Check(searcher.Count(Query.Regex("title", "gr.*") | Query.TermSet("id", ["b1"]) | Query.Exists("attrs")) == 3, "regex, term set, exists");
+    Check(searcher.Count(Query.DisjunctionMax([Query.Phrase("title", "row"), Query.Phrase("body", "row")]).ConstantScore()) == 1, "dis-max and constant score");
+    var mlt = searcher.Search(Query.MoreLikeThis(new Dictionary<string, string> { ["body"] = "a family and the dust" },
+        new MoreLikeThisOptions { MinDocFrequency = 1, MinTermFrequency = 1 }));
+    Check(mlt.Count > 0 && mlt[0].Document.GetString("id") == "b2", "more like this");
+
+    SortBy[] order = [SortBy.Field("year"), SortBy.Score()];
+    var page1 = searcher.Search(Query.All, new SearchOptions { Limit = 2, Fields = ["id"], OrderBy = order });
+    var page2 = searcher.Search(Query.All, new SearchOptions { Limit = 2, Fields = ["id"], OrderBy = order, SearchAfter = page1[^1].Cursor });
+    Check(string.Join(",", page1.Concat(page2).Select(h => h.Document.GetString("id"))) == "b1,b2,b3", "multi-key sort with cursor paging and field selection");
+    Check(searcher.Explain(Query.Parse("rabbits"), parsed[0]).Value > 0, "explain");
+    var parser = new QueryParserOptions { DefaultOperator = QueryOperator.And, Lenient = true, FuzzyFields = new Dictionary<string, FuzzyOptions> { ["title"] = new(1) } };
+    Check(searcher.Count(Query.Parse("canery row (", parser)) == 1, "query parser options");
 
     try
     {

@@ -4,8 +4,8 @@ using System.Text.Json;
 
 namespace TantivyDotNet;
 
-/// <summary>A language for <see cref="Analyzer.Stem"/> and <see cref="Analyzer.StopWords(Language)"/>.</summary>
-public enum Language
+/// <summary>A language for <see cref="Analyzer.Stem"/> and <see cref="Analyzer.StopWords(AnalyzerLanguage)"/>.</summary>
+public enum AnalyzerLanguage
 {
     /// <summary>Arabic (stemming only).</summary>
     Arabic,
@@ -52,14 +52,14 @@ public enum Language
 /// </summary>
 /// <remarks>
 /// Analyzers are immutable: each filter method returns a new analyzer. Filters run in the order
-/// they are added, so add <see cref="LowerCase"/> before <see cref="StopWords(Language)"/> and
+/// they are added, so add <see cref="LowerCase"/> before <see cref="StopWords(AnalyzerLanguage)"/> and
 /// <see cref="Stem"/>, which expect lowercase input. An index created in a directory saves its
 /// analyzers there, and <see cref="SearchIndex.Open"/> restores them.
 /// </remarks>
 /// <example>
 /// <code>
 /// var schema = new SchemaBuilder()
-///     .AddAnalyzer("en_text", Analyzer.Simple().LowerCase().AsciiFolding().StopWords(Language.English).Stem(Language.English))
+///     .AddAnalyzer("en_text", Analyzer.Simple().LowerCase().AsciiFolding().StopWords(AnalyzerLanguage.English).Stem(AnalyzerLanguage.English))
 ///     .AddAnalyzer("prefix", Analyzer.NGram(1, 10, prefixOnly: true).LowerCase())
 ///     .AddTextField("body", tokenizer: "en_text")
 ///     .AddTextField("title_prefix", tokenizer: "prefix")
@@ -128,10 +128,10 @@ public sealed class Analyzer : IEquatable<Analyzer>
 
     /// <summary>
     /// Drops the common words of <paramref name="language"/> (Tantivy's built-in lists). Expects
-    /// lowercase tokens. Not every language has a list (see <see cref="Language"/>); a missing one
+    /// lowercase tokens. Not every language has a list (see <see cref="AnalyzerLanguage"/>); a missing one
     /// fails when the schema is used to create an index.
     /// </summary>
-    public Analyzer StopWords(Language language) =>
+    public Analyzer StopWords(AnalyzerLanguage language) =>
         Filter("stop_words", $"stop_words({LanguageName(language)})", w => w.WriteString("language", LanguageName(language)));
 
     /// <summary>Drops tokens equal to any of <paramref name="words"/> (exact, case-sensitive match).</summary>
@@ -149,7 +149,7 @@ public sealed class Analyzer : IEquatable<Analyzer>
     }
 
     /// <summary>Reduces tokens to their stem with the Snowball stemmer for <paramref name="language"/> (<c>running</c> → <c>run</c>). Expects lowercase tokens.</summary>
-    public Analyzer Stem(Language language) =>
+    public Analyzer Stem(AnalyzerLanguage language) =>
         Filter("stemmer", $"stem({LanguageName(language)})", w => w.WriteString("language", LanguageName(language)));
 
     /// <summary>Drops tokens longer than <paramref name="maxBytes"/> UTF-8 bytes (the <c>default</c> tokenizer uses 40).</summary>
@@ -241,11 +241,11 @@ public sealed class Analyzer : IEquatable<Analyzer>
         return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 
-    private static string LanguageName(Language language) =>
+    private static string LanguageName(AnalyzerLanguage language) =>
         Enum.IsDefined(language)
             ? language.ToString().ToLowerInvariant()
             : throw new ArgumentOutOfRangeException(nameof(language), language, "Unknown language.");
 
-    private static Language ParseLanguage(string? name) =>
-        Enum.TryParse<Language>(name, ignoreCase: true, out var l) ? l : throw new InvalidOperationException($"Unknown language '{name}'.");
+    private static AnalyzerLanguage ParseLanguage(string? name) =>
+        Enum.TryParse<AnalyzerLanguage>(name, ignoreCase: true, out var l) ? l : throw new InvalidOperationException($"Unknown language '{name}'.");
 }

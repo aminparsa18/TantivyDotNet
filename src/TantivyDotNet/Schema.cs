@@ -25,7 +25,7 @@ public enum FieldType
     /// <summary>Schemaless JSON object; see <see cref="SchemaBuilder.AddJsonField"/>.</summary>
     Json,
     /// <summary>IPv4 or IPv6 address; see <see cref="SchemaBuilder.AddIpAddressField"/>.</summary>
-    IpAddr,
+    IpAddress,
     /// <summary>A field type this version of TantivyDotNet doesn't know.</summary>
     Other,
 }
@@ -139,7 +139,7 @@ public sealed class Schema
         FieldType.Bytes => "bytes",
         FieldType.Facet => "facet",
         FieldType.Json => "json",
-        FieldType.IpAddr => "ip",
+        FieldType.IpAddress => "ip",
         _ => throw new NotSupportedException($"Creating {type} fields isn't supported yet."),
     };
 
@@ -154,7 +154,7 @@ public sealed class Schema
         "bytes" => FieldType.Bytes,
         "facet" => FieldType.Facet,
         "json" => FieldType.Json,
-        "ip" => FieldType.IpAddr,
+        "ip" => FieldType.IpAddress,
         _ => FieldType.Other,
     };
 }
@@ -292,7 +292,7 @@ public sealed class SchemaBuilder
     /// Query with <see cref="Query.Term(string, System.Net.IPAddress)"/> and ranges.
     /// </summary>
     public SchemaBuilder AddIpAddressField(string name, bool stored = false, bool indexed = true, bool fast = false) =>
-        Add(new FieldDefinition(name, FieldType.IpAddr, stored, indexed, fast, null));
+        Add(new FieldDefinition(name, FieldType.IpAddress, stored, indexed, fast, null));
 
     /// <summary>Creates the schema. The builder can keep being used afterwards.</summary>
     /// <exception cref="InvalidOperationException">No fields were added, or a text field uses a tokenizer that is neither built in nor added with <see cref="AddAnalyzer"/>.</exception>
