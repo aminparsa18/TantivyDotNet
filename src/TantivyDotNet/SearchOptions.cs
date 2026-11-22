@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace TantivyDotNet;
 
 /// <summary>
-/// Everything about a search besides the query: paging, ordering, snippets and facet counts.
+/// Everything about a search besides the query: paging, ordering, snippets, facet counts and aggregations.
 /// Pass it to <see cref="Searcher.Search(Query, SearchOptions)"/>.
 /// </summary>
 /// <example>
@@ -71,7 +71,46 @@ public sealed class SearchOptions
         }
     }
 
-    // Shape: {"query": {...}, "limit": n, "offset": n, "sort"?: {...}, "snippets"?: {...}, "facets"?: [...]}
+    /// <summary>
+    /// Aggregations to compute over all matching documents, as a JSON object in Tantivy's
+    /// Elasticsearch-compatible format, or null for none. Results are in
+    /// <see cref="SearchResults.Aggregations"/>. Aggregated fields must be fast fields.
+    /// </summary>
+    /// <example>
+    /// <code>
+    /// Aggregations = """
+    ///     {"by_decade": {"histogram": {"field": "year", "interval": 10}},
+    ///      "avg_price": {"avg": {"field": "price"}}}
+    ///     """
+    /// </code>
+    /// Supported kinds include <c>terms</c>, <c>range</c>, <c>histogram</c>, <c>date_histogram</c>,
+    /// <c>avg</c>, <c>sum</c>, <c>min</c>, <c>max</c>, <c>stats</c>, <c>percentiles</c>,
+    /// <c>cardinality</c> and <c>top_hits</c>, with nested <c>aggs</c>; see Tantivy's aggregation documentation.
+    /// </example>
+    /// <exception cref="ArgumentException">The value isn't a JSON object.</exception>
+    public string? Aggregations
+    {
+        get;
+        init
+        {
+            if (value is not null)
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(value);
+                    if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                        throw new ArgumentException("Aggregations must be a JSON object, like {\"name\": {\"avg\": {\"field\": \"price\"}}}.", nameof(Aggregations));
+                }
+                catch (JsonException e)
+                {
+                    throw new ArgumentException($"Aggregations isn't valid JSON: {e.Message}", nameof(Aggregations), e);
+                }
+            }
+            field = value;
+        }
+    }
+
+    // Shape: {"query": {...}, "limit": n, "offset": n, "sort"?: {...}, "snippets"?: {...}, "facets"?: [...], "aggregations"?: {...}}
     // (see tdn_searcher_search in native/src/lib.rs).
     internal byte[] ToRequestJson(Query query)
     {
@@ -98,6 +137,11 @@ public sealed class SearchOptions
                 w.WriteStartArray("facets");
                 foreach (var f in Facets) f.WriteJson(w);
                 w.WriteEndArray();
+            }
+            if (Aggregations is not null)
+            {
+                w.WritePropertyName("aggregations");
+                w.WriteRawValue(Aggregations, skipInputValidation: true);   // validated in the setter
             }
             w.WriteEndObject();
         }

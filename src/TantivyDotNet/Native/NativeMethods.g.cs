@@ -112,9 +112,10 @@ namespace TantivyDotNet.Native
 
         /// <summary>
         ///  Runs a search described by request JSON (see `query_spec` for the query part):
-        ///  `{"query": {...}, "limit": n, "offset": n, "sort": {...}?, "snippets": {...}?, "facets": [...]?}`,
+        ///  `{"query": {...}, "limit": n, "offset": n, "sort": {...}?, "snippets": {...}?, "facets": [...]?, "aggregations": {...}?}`,
         ///  and returns `{"count": &lt;total matches&gt;, "hits": [{"score": f|null, "sort": {...}?, "doc": {"field": [values...]},
-        ///  "snippets": {...}?}], "facets": {...}?}` (see the `sorting`, `snippets` and `facets` modules).
+        ///  "snippets": {...}?}], "facets": {...}?, "aggregations": {...}?}`
+        ///  (see the `sorting`, `snippets`, `facets` and `aggregations` modules).
         ///  `limit == 0` only counts.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_searcher_search", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]

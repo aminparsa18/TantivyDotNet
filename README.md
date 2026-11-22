@@ -4,7 +4,7 @@ An idiomatic .NET binding for [Tantivy](https://github.com/quickwit-oss/tantivy)
 
 ## Status
 
-**Early development.** The core API works: schemas, in-memory and on-disk indexes, adding and deleting documents, commit and rollback, and query-string search. Snippets, programmatic queries, facets, sorting and aggregations come next. Nothing is published on NuGet yet, and the API may still change.
+**Early development.** Schemas, in-memory and on-disk indexes, adding and deleting documents, commit and rollback, query strings and queries built in code, snippets, facets, sorting and aggregations all work. NuGet packaging and CI come next. Nothing is published on NuGet yet, and the API may still change.
 
 ## Usage
 
@@ -55,6 +55,7 @@ var results = searcher.Search(query, new SearchOptions
     OrderBy = SortBy.Field("year", descending: true),       // a fast field; null = by relevance
     Snippets = new SnippetOptions("body") { MaxLength = 200 },
     Facets = [new FacetRequest("genre", "/fiction") { Top = 5 }],
+    Aggregations = """{"by_decade": {"histogram": {"field": "year", "interval": 10}}}""",
 });
 ```
 
@@ -69,6 +70,11 @@ var results = searcher.Search(query, new SearchOptions
   ```csharp
   foreach (var (path, count) in results.Facets["genre"])  // counts over all matches, not just this page
       Console.WriteLine($"{path}: {count}");              // /fiction/novel: 12 ...
+  ```
+- **Aggregations** use Tantivy's Elasticsearch-compatible JSON (`terms`, `range`, `histogram`, `date_histogram`, `avg`, `stats`, `percentiles`, `cardinality`, `top_hits` and more, with nested `aggs`) over fast fields. They run in the same pass as the hits. Read the result as JSON or as your own types:
+  ```csharp
+  JsonElement aggs = results.Aggregations!.Value;          // {"by_decade": {"buckets": [{"key": 1930.0, "doc_count": 2}, ...]}}
+  var typed = results.GetAggregations(MyJsonContext.Default.MyAggs);   // AOT-safe; GetAggregations<T>() uses reflection
   ```
 
 Some behavior to know about:
@@ -90,7 +96,7 @@ tests/TantivyDotNet.Tests/  xUnit v3 tests
 
 - Each Rust object is an opaque handle wrapped in a `SafeHandle`. No raw pointers are exposed publicly.
 - Every export catches panics. Errors come back as status codes and turn into `TantivyException`.
-- Complex shapes (documents, schemas, aggregations) cross the boundary as JSON.
+- Complex shapes cross the boundary as JSON: documents, schemas, and a single search request (query tree, paging, sort, snippets, facets, aggregations) that runs in one collector pass.
 
 ## Building
 

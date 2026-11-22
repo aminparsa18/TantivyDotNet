@@ -3,6 +3,7 @@
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
+use tantivy::aggregation::AggregationError;
 use tantivy::TantivyError;
 
 use crate::TdnString;
@@ -45,7 +46,10 @@ impl From<TantivyError> for FfiError {
             | TantivyError::IoError(_) => status::IO,
             TantivyError::FieldNotFound(_)
             | TantivyError::InvalidArgument(_)
-            | TantivyError::SchemaError(_) => status::INVALID_ARGUMENT,
+            | TantivyError::SchemaError(_)
+            | TantivyError::AggregationError(
+                AggregationError::InvalidRequest(_) | AggregationError::DateHistogramParseError(_),
+            ) => status::INVALID_ARGUMENT,
             _ => status::ERROR,
         };
         Self::new(code, e.to_string())

@@ -1,5 +1,7 @@
 using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
+using System.Text.Json.Serialization.Metadata;
 using TantivyDotNet.Interop;
 using TantivyDotNet.Native;
 
@@ -123,12 +125,43 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
 
     private static readonly IReadOnlyDictionary<string, IReadOnlyList<FacetCount>> NoFacets = new Dictionary<string, IReadOnlyList<FacetCount>>();
 
-    private SearchResults(SearchHit[] hits, long totalCount, IReadOnlyDictionary<string, IReadOnlyList<FacetCount>> facets)
+    private SearchResults(SearchHit[] hits, long totalCount, IReadOnlyDictionary<string, IReadOnlyList<FacetCount>> facets, JsonElement? aggregations)
     {
         _hits = hits;
         TotalCount = totalCount;
         Facets = facets;
+        Aggregations = aggregations;
     }
+
+    /// <summary>
+    /// The results of <see cref="SearchOptions.Aggregations"/>, keyed by the names used in the
+    /// request (Tantivy's Elasticsearch-style result JSON), or null if none were requested.
+    /// </summary>
+    /// <example>
+    /// <c>{"by_decade": {"buckets": [{"key": 1930.0, "doc_count": 2}, ...]}, "avg_price": {"value": 9.5}}</c>
+    /// </example>
+    public JsonElement? Aggregations { get; }
+
+    /// <summary>Deserializes <see cref="Aggregations"/> into <typeparamref name="T"/> (AOT-safe).</summary>
+    /// <param name="typeInfo">Source-generated metadata for <typeparamref name="T"/>, for example <c>MyJsonContext.Default.MyAggs</c>.</param>
+    /// <exception cref="InvalidOperationException">No aggregations were requested.</exception>
+    public T? GetAggregations<T>(JsonTypeInfo<T> typeInfo)
+    {
+        ArgumentNullException.ThrowIfNull(typeInfo);
+        return RequireAggregations().Deserialize(typeInfo);
+    }
+
+    /// <summary>
+    /// Deserializes <see cref="Aggregations"/> into <typeparamref name="T"/> with reflection-based
+    /// System.Text.Json. For trimmed or NativeAOT apps, use <see cref="GetAggregations{T}(JsonTypeInfo{T})"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">No aggregations were requested.</exception>
+    [RequiresUnreferencedCode("Reflection-based JSON deserialization. Use GetAggregations<T>(JsonTypeInfo<T>) for trimmed apps.")]
+    [RequiresDynamicCode("Reflection-based JSON deserialization. Use GetAggregations<T>(JsonTypeInfo<T>) for NativeAOT apps.")]
+    public T? GetAggregations<T>() => RequireAggregations().Deserialize<T>();
+
+    private JsonElement RequireAggregations() =>
+        Aggregations ?? throw new InvalidOperationException("No aggregations were requested; set SearchOptions.Aggregations.");
 
     /// <summary>
     /// Facet counts keyed by facet field, for the <see cref="SearchOptions.Facets"/> requested:
@@ -169,7 +202,8 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
             };
         }
         var facets = root.TryGetProperty("facets", out var fj) ? ParseFacets(fj) : NoFacets;
-        return new SearchResults(hits, root.GetProperty("count").GetInt64(), facets);
+        JsonElement? aggregations = root.TryGetProperty("aggregations", out var aj) ? aj.Clone() : null;
+        return new SearchResults(hits, root.GetProperty("count").GetInt64(), facets, aggregations);
     }
 
     // Shape: {"field": [{"path": "/a", "count": n}, ...]} (see native/src/facets.rs).

@@ -15,6 +15,7 @@
 //! writable. The .NET layer upholds this via `SafeHandle` leases and `fixed` buffers.
 #![allow(clippy::missing_safety_doc)] // covered once by the crate-level section above
 
+mod aggregations;
 mod facets;
 mod ffi;
 mod query_spec;
@@ -26,6 +27,7 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
+use tantivy::aggregation::agg_result::AggregationResults;
 use tantivy::collector::{Count, MultiCollector};
 use tantivy::schema::{Field, FieldType, NamedFieldDocument, Schema};
 use tantivy::{
@@ -353,6 +355,8 @@ struct SearchResultJson {
     hits: Vec<HitJson>,
     #[serde(skip_serializing_if = "Option::is_none")]
     facets: Option<FacetResultJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    aggregations: Option<AggregationResults>,
 }
 
 #[derive(Serialize)]
@@ -379,6 +383,8 @@ struct SearchRequest {
     facets: Option<Vec<FacetRequest>>,
     #[serde(default)]
     sort: Option<SortRequest>,
+    #[serde(default)]
+    aggregations: Option<serde_json::Value>,
 }
 
 fn default_limit() -> usize {
@@ -386,9 +392,10 @@ fn default_limit() -> usize {
 }
 
 /// Runs a search described by request JSON (see `query_spec` for the query part):
-/// `{"query": {...}, "limit": n, "offset": n, "sort": {...}?, "snippets": {...}?, "facets": [...]?}`,
+/// `{"query": {...}, "limit": n, "offset": n, "sort": {...}?, "snippets": {...}?, "facets": [...]?, "aggregations": {...}?}`,
 /// and returns `{"count": <total matches>, "hits": [{"score": f|null, "sort": {...}?, "doc": {"field": [values...]},
-/// "snippets": {...}?}], "facets": {...}?}` (see the `sorting`, `snippets` and `facets` modules).
+/// "snippets": {...}?}], "facets": {...}?, "aggregations": {...}?}`
+/// (see the `sorting`, `snippets`, `facets` and `aggregations` modules).
 /// `limit == 0` only counts.
 #[no_mangle]
 pub unsafe extern "C" fn tdn_searcher_search(
@@ -417,10 +424,16 @@ pub unsafe extern "C" fn tdn_searcher_search(
             None => Vec::new(),
         };
 
+        let agg_handle = match &request.aggregations {
+            Some(a) => Some(aggregations::add(a, &s.index, &mut collectors)?),
+            None => None,
+        };
+
         let mut fruits = s.searcher.search(&query, &collectors)?;
         let count = count_handle.extract(&mut fruits);
         let top = top_handle.map(|h| sorting::extract(h, &mut fruits)).unwrap_or_default();
         let facets = request.facets.is_some().then(|| facets::collect(facet_plans, &mut fruits));
+        let aggregations = agg_handle.map(|h| h.extract(&mut fruits));
 
         // Built even with no hits, so an invalid snippet field fails consistently.
         let snippets = request
@@ -437,7 +450,7 @@ pub unsafe extern "C" fn tdn_searcher_search(
             })
             .collect::<FfiResult<Vec<_>>>()?;
 
-        let json = serde_json::to_string(&SearchResultJson { count, hits, facets })
+        let json = serde_json::to_string(&SearchResultJson { count, hits, facets, aggregations })
             .map_err(|e| FfiError::new(ffi::status::ERROR, format!("result serialization: {e}")))?;
         write_out(out, TdnString::from_string(json), "result")
     })
