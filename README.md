@@ -45,6 +45,15 @@ var query = Query.Phrase("body", "of mice", slop: 1)            // analyzed with
 var results = searcher.Search(query);
 ```
 
+Snippets highlight matches in stored text fields:
+
+```csharp
+var results = searcher.Search("rabbits", snippets: new SnippetOptions("body") { MaxLength = 200 });
+Snippet s = results[0].Snippets["body"];
+s.ToHtml();                                            // "...a farm with <b>rabbits</b> and mice", HTML-encoded
+foreach (Range r in s.Highlights) Console.WriteLine(s.Fragment[r]);
+```
+
 Some behavior to know about:
 
 - **Thread safety.** `SearchIndex` and `Searcher` are thread-safe, so share one searcher across threads. `IndexWriter` is not thread-safe; use it from one thread at a time (it already indexes on several threads internally). Only one writer can be open per index at a time.

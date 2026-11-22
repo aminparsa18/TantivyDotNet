@@ -18,7 +18,9 @@
 mod ffi;
 mod query_spec;
 mod schema_spec;
+mod snippets;
 
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
@@ -29,6 +31,7 @@ use tantivy::{
 };
 
 use query_spec::QuerySpec;
+use snippets::{SnippetJson, SnippetRequest, Snippets};
 use ffi::{guard, handle, str_arg, write_out, FfiError, FfiResult};
 
 /// Bumped whenever the exported C ABI changes; the managed side checks it on load.
@@ -350,6 +353,8 @@ struct SearchResultJson {
 struct HitJson {
     score: f32,
     doc: NamedFieldDocument,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snippets: Option<BTreeMap<String, SnippetJson>>,
 }
 
 #[derive(Deserialize)]
@@ -359,6 +364,8 @@ struct SearchRequest {
     limit: usize,
     #[serde(default)]
     offset: usize,
+    #[serde(default)]
+    snippets: Option<SnippetRequest>,
 }
 
 fn default_limit() -> usize {
@@ -366,8 +373,9 @@ fn default_limit() -> usize {
 }
 
 /// Runs a search described by request JSON (see `query_spec` for the query part):
-/// `{"query": {...}, "limit": n, "offset": n}`, and returns
-/// `{"count": <total matches>, "hits": [{"score": f, "doc": {"field": [values...]}}]}`.
+/// `{"query": {...}, "limit": n, "offset": n, "snippets": {...}?}`, and returns
+/// `{"count": <total matches>, "hits": [{"score": f, "doc": {"field": [values...]}, "snippets": {...}?}]}`
+/// (see `snippets` for the snippet parts).
 /// `limit == 0` only counts.
 #[no_mangle]
 pub unsafe extern "C" fn tdn_searcher_search(
@@ -392,11 +400,18 @@ pub unsafe extern "C" fn tdn_searcher_search(
             s.searcher.search(&query, &(top_docs, Count))?
         };
 
+        // Built even with no hits, so an invalid snippet field fails consistently.
+        let snippets = request
+            .snippets
+            .as_ref()
+            .map(|r| Snippets::new(r, &s.searcher, query.as_ref()))
+            .transpose()?;
         let hits = top
             .into_iter()
             .map(|(score, address)| {
                 let doc: TantivyDocument = s.searcher.doc(address)?;
-                Ok(HitJson { score, doc: doc.to_named_doc(&schema) })
+                let snippets = snippets.as_ref().map(|g| g.for_doc(&doc));
+                Ok(HitJson { score, doc: doc.to_named_doc(&schema), snippets })
             })
             .collect::<FfiResult<Vec<_>>>()?;
 
