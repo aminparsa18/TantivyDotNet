@@ -4,7 +4,44 @@ An idiomatic .NET binding for [Tantivy](https://github.com/quickwit-oss/tantivy)
 
 ## Status
 
-**Early development. Not usable yet.** The native library builds, links and runs a smoke test from .NET. The public C# API (schema, index, writer, searcher) comes next. Nothing is published on NuGet yet.
+**Early development.** The core API works: schemas, in-memory and on-disk indexes, adding and deleting documents, commit and rollback, and query-string search. Snippets, programmatic queries, facets, sorting and aggregations come next. Nothing is published on NuGet yet, and the API may still change.
+
+## Usage
+
+```csharp
+using TantivyDotNet;
+
+var schema = new SchemaBuilder()
+    .AddStringField("id", stored: true)          // exact-match: good for IDs and deletes
+    .AddTextField("title", stored: true)         // tokenized full text
+    .AddTextField("body")
+    .AddU64Field("year", stored: true, fast: true)
+    .Build();
+
+using var index = SearchIndex.Create("books-index", schema);   // or SearchIndex.CreateInRam(schema) / SearchIndex.Open(dir)
+
+using (var writer = index.CreateWriter(heapBytes: 50_000_000))
+{
+    writer.AddDocument(new { id = "b1", title = "Of Mice and Men", body = "...", year = 1937 });
+    writer.AddDocument("""{"id": "b2", "title": "The Pearl", "year": 1947}""");   // raw JSON works too
+    writer.DeleteTerm("id", "old-id");
+    writer.Commit();                             // Dispose without Commit discards changes
+}
+
+using var searcher = index.CreateSearcher();     // a snapshot of the last commit
+var hits = searcher.Search("body:mice AND year:[1930 TO 1940]", limit: 10, defaultFields: ["title", "body"]);
+Console.WriteLine($"{hits.TotalCount} matches");
+foreach (var hit in hits)
+    Console.WriteLine($"{hit.Score} {hit.Document.GetString("title")}");
+```
+
+Some behavior to know about:
+
+- **Thread safety.** `SearchIndex` and `Searcher` are thread-safe, so share one searcher across threads. `IndexWriter` is not thread-safe; use it from one thread at a time (it already indexes on several threads internally). Only one writer can be open per index at a time.
+- **Searchers are snapshots.** A searcher doesn't see commits made after it was created. Create a new one to see them; creating one is cheap.
+- **Trimming and NativeAOT.** `AddDocument(object)` uses reflection-based System.Text.Json and is annotated with `[RequiresUnreferencedCode]`. In trimmed or AOT apps, use `AddDocument(doc, MyJsonContext.Default.MyType)` or pass JSON strings instead.
+- **Errors.** Native errors throw `TantivyException`, whose `Code` property tells you the category. Query syntax errors throw `QueryParseException`. Using an object after it has been disposed throws `ObjectDisposedException`.
+- **Documents.** Field values are matched to schema fields by name, and unknown fields are ignored. Dates must be RFC 3339 strings with an offset, so use `DateTimeOffset` or UTC `DateTime`.
 
 ## How it works
 

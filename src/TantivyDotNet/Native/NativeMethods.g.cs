@@ -18,21 +18,142 @@ namespace TantivyDotNet.Native
 
 
 
-        /// <summary>
-        ///  Bumped whenever the exported C ABI changes; the managed side checks it on load.
-        /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_abi_version", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern uint tdn_abi_version();
 
         /// <summary>
-        ///  End-to-end smoke test proving Tantivy links and runs: builds an in-RAM index with one
-        ///  document, searches for "rust", and returns the hit count (1), or -1 on error/panic.
-        ///  Replace with the real handle-based API in step 2.
+        ///  Releases a buffer returned through a `TdnString` out-parameter. Accepts an empty/null buffer.
         /// </summary>
-        [DllImport(__DllName, EntryPoint = "tdn_smoke_test", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int tdn_smoke_test();
+        [DllImport(__DllName, EntryPoint = "tdn_string_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void tdn_string_free(TdnString s);
+
+        /// <summary>
+        ///  Creates an index in anonymous memory from schema JSON (see `schema_spec`).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_index_create_in_ram", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_index_create_in_ram(byte* schema_ptr, nuint schema_len, TdnIndex** @out, TdnString* err);
+
+        /// <summary>
+        ///  Creates a new index in an existing directory. Fails if the directory already holds an index.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_index_create_in_dir", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_index_create_in_dir(byte* path_ptr, nuint path_len, byte* schema_ptr, nuint schema_len, TdnIndex** @out, TdnString* err);
+
+        /// <summary>
+        ///  Opens an existing index directory.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_index_open_in_dir", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_index_open_in_dir(byte* path_ptr, nuint path_len, TdnIndex** @out, TdnString* err);
+
+        /// <summary>
+        ///  Returns the index's schema as schema JSON.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_index_schema", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_index_schema(TdnIndex* index, TdnString* @out, TdnString* err);
+
+        [DllImport(__DllName, EntryPoint = "tdn_index_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void tdn_index_free(TdnIndex* index);
+
+        /// <summary>
+        ///  Creates the index's writer. `num_threads == 0` lets Tantivy choose (up to 8, at least 15 MB
+        ///  of heap per thread). Only one writer may exist per index at a time.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_index_writer", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_index_writer(TdnIndex* index, nuint heap_bytes, nuint num_threads, TdnWriter** @out, TdnString* err);
+
+        /// <summary>
+        ///  Adds one document given as a JSON object (field name -&gt; value or array of values).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_writer_add_json", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_writer_add_json(TdnWriter* writer, byte* json_ptr, nuint json_len, TdnString* err);
+
+        /// <summary>
+        ///  Deletes every document whose text field contains exactly this term. The value is not run
+        ///  through the field's tokenizer.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_writer_delete_text", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_writer_delete_text(TdnWriter* writer, byte* field_ptr, nuint field_len, byte* value_ptr, nuint value_len, TdnString* err);
+
+        [DllImport(__DllName, EntryPoint = "tdn_writer_delete_u64", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_writer_delete_u64(TdnWriter* writer, byte* field_ptr, nuint field_len, ulong value, TdnString* err);
+
+        [DllImport(__DllName, EntryPoint = "tdn_writer_delete_i64", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_writer_delete_i64(TdnWriter* writer, byte* field_ptr, nuint field_len, long value, TdnString* err);
+
+        [DllImport(__DllName, EntryPoint = "tdn_writer_delete_all", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_writer_delete_all(TdnWriter* writer, TdnString* err);
+
+        [DllImport(__DllName, EntryPoint = "tdn_writer_commit", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_writer_commit(TdnWriter* writer, TdnString* err);
+
+        /// <summary>
+        ///  Discards every add/delete since the last commit.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_writer_rollback", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_writer_rollback(TdnWriter* writer, TdnString* err);
+
+        /// <summary>
+        ///  Drops the writer without committing; uncommitted operations are discarded.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_writer_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void tdn_writer_free(TdnWriter* writer);
+
+        /// <summary>
+        ///  Creates a searcher over a snapshot of the latest commit. Searchers are thread-safe.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_index_searcher", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_index_searcher(TdnIndex* index, TdnSearcher** @out, TdnString* err);
+
+        /// <summary>
+        ///  Number of live (non-deleted) documents in the snapshot. Returns 0 for a null handle.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_searcher_num_docs", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern ulong tdn_searcher_num_docs(TdnSearcher* searcher);
+
+        /// <summary>
+        ///  Parses `query` with Tantivy's query language and returns
+        ///  `{"count": &lt;total matches&gt;, "hits": [{"score": f, "doc": {"field": [values...]}}]}`.
+        ///
+        ///  `default_fields_json` is a JSON array of field names used for terms without a `field:` prefix;
+        ///  empty means every indexed text field. `limit == 0` only counts.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_searcher_search", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_searcher_search(TdnSearcher* searcher, byte* query_ptr, nuint query_len, byte* default_fields_ptr, nuint default_fields_len, nuint limit, nuint offset, TdnString* @out, TdnString* err);
+
+        [DllImport(__DllName, EntryPoint = "tdn_searcher_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void tdn_searcher_free(TdnSearcher* searcher);
 
 
+    }
+
+    /// <summary>
+    ///  A Rust-owned UTF-8 buffer handed to the caller. Release with `tdn_string_free`.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct TdnString
+    {
+        public byte* ptr;
+        public nuint len;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct TdnIndex
+    {
+    }
+
+    /// <summary>
+    ///  `IndexWriter::commit`/`rollback` take `&amp;mut self`. The mutex makes concurrent calls from .NET
+    ///  serialize instead of being undefined behaviour; the public API still documents the writer as
+    ///  not thread-safe.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct TdnWriter
+    {
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct TdnSearcher
+    {
     }
 
 

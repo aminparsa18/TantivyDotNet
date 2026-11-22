@@ -998,6 +998,8 @@ name = "tantivy_dotnet"
 version = "0.1.0"
 dependencies = [
  "csbindgen",
+ "serde",
+ "serde_json",
  "tantivy",
 ]
 
