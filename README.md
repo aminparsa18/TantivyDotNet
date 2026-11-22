@@ -4,7 +4,7 @@ An idiomatic .NET binding for [Tantivy](https://github.com/quickwit-oss/tantivy)
 
 ## Status
 
-**Early development.** Schemas (including JSON and IP address fields), custom analyzers, in-memory and on-disk indexes, adding, updating and deleting documents, commit and rollback, query strings and queries built in code, snippets, facets, multi-key sorting with cursor paging, aggregations and score explanations all work. CI builds a NuGet package for every supported platform and tests it, including from a NativeAOT app. Preview releases are [on nuget.org](https://www.nuget.org/packages/TantivyDotNet); the API may still change before 1.0.
+**Early development.** Schemas (including JSON and IP address fields), custom analyzers, in-memory and on-disk indexes, adding, updating and deleting documents, commit and rollback, query strings and queries built in code, snippets, facets, multi-key sorting with cursor paging, aggregations, score explanations, merge control, index settings, index statistics and shared searchers all work. CI builds a NuGet package for every supported platform and tests it, including from a NativeAOT app. Preview releases are [on nuget.org](https://www.nuget.org/packages/TantivyDotNet); the API may still change before 1.0.
 
 ## Installation
 
@@ -127,10 +127,48 @@ var schema = new SchemaBuilder()
     .Build();
 ```
 
+**Index lifecycle.** Settings fixed at creation are saved with the index; merge behavior is chosen per writer:
+
+```csharp
+using var index = SearchIndex.Create("books-index", schema, new IndexSettings
+{
+    DocStoreCompression = DocStoreCompression.Zstd, ZstdLevel = 9,   // stored fields; default Lz4
+    DocStoreBlockSize = 64 * 1024,
+});
+using (var writer = index.CreateWriter(new IndexWriterOptions { MergePolicy = new LogMergePolicy { MinSegments = 4 } }))  // or MergePolicy.None
+{
+    // ... bulk load, Commit() ...
+    writer.ForceMerge();               // for a read-mostly index: merge down to 1 segment, dropping deleted documents
+    writer.GarbageCollectFiles();      // delete files no longer used (also done after commits and merges)
+}
+IndexStats stats = index.GetStats();   // or searcher.GetStats() for that snapshot
+Console.WriteLine(stats);              // "1 segments, 1000 docs (0 deleted), 81920 bytes"
+foreach (var f in stats.Fields) Console.WriteLine($"{f.Name}: {f.TotalBytes} bytes ({f.PostingsBytes} postings)");
+```
+
+`IndexSettings.SortBy` (store documents ordered by a fast field) is experimental, because Tantivy has removed this feature once before; using it raises warning `TDN0001`.
+
+**Sharing a searcher.** In a server, a `SearcherManager` keeps one searcher for all requests and replaces it when the index changes. A lease keeps its searcher valid until disposed, even after it's replaced:
+
+```csharp
+using var manager = index.CreateSearcherManager(new SearcherManagerOptions
+{
+    RefreshOnCommit = true,                           // pick up commits (also from other processes) automatically
+    Warmer = s => s.Search("common query", limit: 1), // runs on each new searcher before requests see it
+});
+using (var lease = manager.Acquire())                 // per request
+    lease.Searcher.Search(query);
+manager.Refresh();                                    // or reload explicitly, e.g. right after your own Commit()
+```
+
+With `RefreshOnCommit`, a commit shows up shortly after `Commit()` returns (Tantivy reloads in the background), not immediately.
+
 Some behavior to know about:
 
+- **Crashes.** A commit is atomic: if the process dies (even during `Commit()`), reopening the index gives the last completed commit, and uncommitted documents are lost. The writer lock is an OS file lock, so it's released when the process dies and the next process can open a writer right away. Files of an interrupted commit or merge are deleted by a later commit or `GarbageCollectFiles()`. The tests check this by killing a child process in the middle of commits.
+- **Undisposed writers.** `IndexWriter.Dispose()` waits for background merges. A writer that's never disposed is cleaned up by its finalizer, which doesn't wait: it abandons running merges and releases the lock.
 - **Thread safety.** `SearchIndex` and `Searcher` are thread-safe, so share one searcher across threads. `IndexWriter` is not thread-safe; use it from one thread at a time (it already indexes on several threads internally). Only one writer can be open per index at a time.
-- **Searchers are snapshots.** A searcher doesn't see commits made after it was created. Create a new one to see them; creating one is cheap.
+- **Searchers are snapshots.** A searcher doesn't see commits made after it was created. Create a new one to see them (creating one is cheap), or use a `SearcherManager`. An old snapshot keeps searching after a merge replaced its segments, but `GetStats()` on it can then fail, because sizes are read by reopening the deleted files.
 - **Trimming and NativeAOT.** `AddDocument(object)` uses reflection-based System.Text.Json and is annotated with `[RequiresUnreferencedCode]`. In trimmed or AOT apps, use `AddDocument(doc, MyJsonContext.Default.MyType)` or pass JSON strings instead.
 - **Errors.** Native errors throw `TantivyException`, whose `Code` property tells you the category. Query syntax errors throw `QueryParseException`. Using an object after it has been disposed throws `ObjectDisposedException`.
 - **Documents.** Field values are matched to schema fields by name, case-sensitively. A property that isn't a schema field throws `TantivyException` (so `new { Title = ... }` doesn't silently miss a `title` field); create the writer with `new IndexWriterOptions { IgnoreUnknownFields = true }` to drop such properties instead. Dates must be RFC 3339 strings with an offset, so use `DateTimeOffset` or UTC `DateTime`.

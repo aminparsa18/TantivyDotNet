@@ -159,14 +159,55 @@ public sealed unsafe class IndexWriter : IDisposable
     public void Rollback() => Run(&NativeMethods.tdn_writer_rollback);
 
     /// <summary>
+    /// Merges the committed segments until at most <paramref name="maxSegments"/> remain, and rewrites
+    /// segments that contain deleted documents to drop them. Blocks until done. Typically called once
+    /// after building an index that is then only read: fewer segments make searches faster.
+    /// </summary>
+    /// <remarks>
+    /// Only committed segments are merged; call <see cref="Commit"/> first. Uncommitted changes stay
+    /// pending. Background merges are paused meanwhile. Merging rewrites the index, so it temporarily
+    /// needs up to twice the disk space, and the replaced files remain until no searcher uses them
+    /// (see <see cref="GarbageCollectFiles"/>). Searchers created before the merge keep their snapshot.
+    /// </remarks>
+    /// <param name="maxSegments">The number of segments to merge down to. Default 1.</param>
+    public void ForceMerge(int maxSegments = 1)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maxSegments);
+        using var lease = _handle.Lease();
+        TdnString err;
+        Ffi.Check(NativeMethods.tdn_writer_force_merge(Ptr(lease), (uint)maxSegments, &err), err);
+    }
+
+    /// <summary>
+    /// Deletes the index files that neither the index nor an open searcher uses anymore, such as
+    /// segments replaced by a merge. Tantivy also does this after commits and merges, so this is
+    /// rarely needed; it's useful to reclaim disk space right after disposing old searchers.
+    /// </summary>
+    /// <returns>The files deleted, and those that couldn't be deleted (on Windows, files still mapped by a searcher).</returns>
+    public GarbageCollectionResult GarbageCollectFiles()
+    {
+        string json;
+        using (var lease = _handle.Lease())
+        {
+            TdnString result, err;
+            Ffi.Check(NativeMethods.tdn_writer_garbage_collect(Ptr(lease), &result, &err), err);
+            json = Ffi.TakeString(result);
+        }
+        using var doc = JsonDocument.Parse(json);
+        static string[] Names(JsonElement e) => [.. e.EnumerateArray().Select(x => x.GetString()!)];
+        return new GarbageCollectionResult(Names(doc.RootElement.GetProperty("deleted")), Names(doc.RootElement.GetProperty("failed")));
+    }
+
+    /// <summary>
     /// Releases the writer and its index lock <b>without committing</b>. Safe to call more than once.
     /// </summary>
     /// <remarks>
     /// Blocks until background segment merges started by earlier commits have finished, as Lucene's
     /// <c>IndexWriter.Dispose()</c> does, so their work isn't lost. After a large commit this can take
-    /// a while.
+    /// a while. A writer that is never disposed is released by its finalizer, which doesn't wait:
+    /// running merges are abandoned (their files are cleaned up later) and the lock is released.
     /// </remarks>
-    public void Dispose() => _handle.Dispose();
+    public void Dispose() => _handle.DisposeExplicitly();
 
     private void AddDocumentUtf8(ReadOnlySpan<byte> json)
     {
@@ -205,3 +246,11 @@ public sealed unsafe class IndexWriter : IDisposable
 
     private static TdnWriter* Ptr(TdnHandle.HandleLease lease) => (TdnWriter*)lease.Pointer;
 }
+
+/// <summary>The result of <see cref="IndexWriter.GarbageCollectFiles"/>.</summary>
+/// <param name="DeletedFiles">Names of the files deleted, relative to the index directory.</param>
+/// <param name="FailedFiles">
+/// Names of unused files that couldn't be deleted, typically on Windows because a searcher still
+/// maps them. A later collection retries them.
+/// </param>
+public sealed record GarbageCollectionResult(IReadOnlyList<string> DeletedFiles, IReadOnlyList<string> FailedFiles);

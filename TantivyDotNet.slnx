@@ -5,6 +5,7 @@
   <Folder Name="/tests/">
     <Project Path="tests/TantivyDotNet.Tests/TantivyDotNet.Tests.csproj" />
     <Project Path="tests/TantivyDotNet.AotSmoke/TantivyDotNet.AotSmoke.csproj" />
+    <Project Path="tests/TantivyDotNet.CrashHelper/TantivyDotNet.CrashHelper.csproj" />
   </Folder>
   <Folder Name="/benchmarks/">
     <Project Path="benchmarks/TantivyDotNet.Benchmarks/TantivyDotNet.Benchmarks.csproj" />

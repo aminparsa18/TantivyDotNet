@@ -14,7 +14,8 @@ namespace TantivyDotNet;
 /// <remarks>
 /// <b>Thread-safe:</b> one searcher can serve concurrent queries from many threads. It never sees
 /// commits made after it was created; create a new searcher to pick those up. Searchers are cheap
-/// to create, but they keep their snapshot's files alive until disposed.
+/// to create, but they keep their snapshot's files alive until disposed. A
+/// <see cref="SearcherManager"/> shares one searcher and replaces it after commits.
 /// </remarks>
 public sealed unsafe class Searcher : IDisposable
 {
@@ -28,6 +29,11 @@ public sealed unsafe class Searcher : IDisposable
 
     /// <summary>The schema of the searched index.</summary>
     public Schema Schema { get; }
+
+    /// <summary>Set for searchers owned by a <see cref="SearcherManager"/>: <see cref="Dispose"/> is then a no-op.</summary>
+    internal bool OwnedByManager { get; init; }
+
+    internal SearcherHandle Handle => _handle;
 
     /// <summary>Number of live (non-deleted) documents in this snapshot.</summary>
     public long DocumentCount
@@ -143,8 +149,35 @@ public sealed unsafe class Searcher : IDisposable
     /// <inheritdoc cref="Search(Query, int, int)" path="/param[@name='query']|/exception"/>
     public long Count(Query query) => Search(query, limit: 0).TotalCount;
 
-    /// <summary>Releases the snapshot. Safe to call more than once.</summary>
-    public void Dispose() => _handle.Dispose();
+    /// <summary>
+    /// Statistics of this searcher's snapshot: segments, document counts, and sizes on disk per
+    /// segment and per field.
+    /// </summary>
+    /// <exception cref="TantivyException">
+    /// With <see cref="TantivyErrorCode.Io"/> if the snapshot is outdated and its files were deleted
+    /// after a merge replaced them. (The searcher can still search, because it keeps its files open,
+    /// but sizes are read by reopening them.) Use a newer searcher or <see cref="SearchIndex.GetStats"/>.
+    /// </exception>
+    public IndexStats GetStats()
+    {
+        string json;
+        using (var lease = _handle.Lease())
+        {
+            TdnString result, err;
+            Ffi.Check(NativeMethods.tdn_searcher_stats((TdnSearcher*)lease.Pointer, &result, &err), err);
+            json = Ffi.TakeString(result);
+        }
+        return IndexStats.Parse(json);
+    }
+
+    /// <summary>
+    /// Releases the snapshot. Safe to call more than once. Does nothing for a searcher leased from a
+    /// <see cref="SearcherManager"/>: dispose the <see cref="SearcherLease"/> instead.
+    /// </summary>
+    public void Dispose()
+    {
+        if (!OwnedByManager) _handle.Dispose();
+    }
 }
 
 /// <summary>The hits returned by <see cref="Searcher.Search(Query, SearchOptions)"/>, best first.</summary>

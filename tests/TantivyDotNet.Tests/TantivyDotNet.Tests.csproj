@@ -15,6 +15,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- The child process of the crash tests; referenced so its build output (dll, runtimeconfig, deps) is copied next to the tests. -->
+  <ItemGroup>
+    <ProjectReference Include="../TantivyDotNet.CrashHelper/TantivyDotNet.CrashHelper.csproj" />
+  </ItemGroup>
+
   <!-- Normally tests run against the project. With TantivyPackageVersion set (CI), they run against the
        packed TantivyDotNet package instead, restored from TantivyPackageSource. That checks the package
        layout and the native library CI built for this runner's RID. -->

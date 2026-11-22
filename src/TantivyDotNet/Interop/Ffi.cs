@@ -7,10 +7,13 @@ namespace TantivyDotNet.Interop;
 internal static unsafe class Ffi
 {
     /// <summary>Must match <c>ABI_VERSION</c> in native/src/lib.rs.</summary>
-    internal const uint ExpectedAbiVersion = 4;
+    internal const uint ExpectedAbiVersion = 5;
 
     /// <summary>Mirrors <c>WRITER_IGNORE_UNKNOWN_FIELDS</c> in native/src/lib.rs (flags of <c>tdn_index_writer</c>).</summary>
     internal const uint WriterIgnoreUnknownFields = 1;
+
+    /// <summary>Mirrors <c>READER_RELOAD_ON_COMMIT</c> in native/src/lib.rs (flags of <c>tdn_index_reader</c>).</summary>
+    internal const uint ReaderReloadOnCommit = 1;
 
     private static volatile bool s_abiChecked;
 

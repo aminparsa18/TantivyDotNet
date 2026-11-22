@@ -56,9 +56,34 @@ internal sealed unsafe class IndexHandle(TdnIndex* pointer) : TdnHandle((IntPtr)
 
 internal sealed unsafe class WriterHandle(TdnWriter* pointer) : TdnHandle((IntPtr)pointer, nameof(IndexWriter))
 {
+    private volatile bool _disposedExplicitly;
+
+    /// <summary>
+    /// Disposes the handle from <see cref="IndexWriter.Dispose"/>. Only then does the release wait
+    /// for background merges; if the finalizer releases the handle instead, the merges are abandoned
+    /// so the finalizer thread never blocks.
+    /// </summary>
+    internal void DisposeExplicitly()
+    {
+        _disposedExplicitly = true;
+        Dispose();
+    }
+
     protected override bool ReleaseHandle()
     {
-        NativeMethods.tdn_writer_free((TdnWriter*)handle);
+        if (_disposedExplicitly)
+            NativeMethods.tdn_writer_free((TdnWriter*)handle);
+        else
+            NativeMethods.tdn_writer_free_no_wait((TdnWriter*)handle);
+        return true;
+    }
+}
+
+internal sealed unsafe class ReaderHandle(TdnReader* pointer) : TdnHandle((IntPtr)pointer, nameof(SearcherManager))
+{
+    protected override bool ReleaseHandle()
+    {
+        NativeMethods.tdn_reader_free((TdnReader*)handle);
         return true;
     }
 }

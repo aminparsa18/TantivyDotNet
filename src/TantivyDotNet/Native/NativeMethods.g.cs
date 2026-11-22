@@ -28,17 +28,18 @@ namespace TantivyDotNet.Native
         internal static extern void tdn_string_free(TdnString s);
 
         /// <summary>
-        ///  Creates an index in anonymous memory from schema JSON (see `schema_spec`).
+        ///  Creates an index in anonymous memory from schema JSON (see `schema_spec`) and settings JSON
+        ///  (see `settings`; empty = defaults).
         /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_index_create_in_ram", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int tdn_index_create_in_ram(byte* schema_ptr, nuint schema_len, TdnIndex** @out, TdnString* err);
+        internal static extern int tdn_index_create_in_ram(byte* schema_ptr, nuint schema_len, byte* settings_ptr, nuint settings_len, TdnIndex** @out, TdnString* err);
 
         /// <summary>
         ///  Creates a new index in an existing directory. Fails if the directory already holds an index.
         ///  Custom analyzers are saved next to it (`analyzers::ANALYZERS_FILE`).
         /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_index_create_in_dir", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int tdn_index_create_in_dir(byte* path_ptr, nuint path_len, byte* schema_ptr, nuint schema_len, TdnIndex** @out, TdnString* err);
+        internal static extern int tdn_index_create_in_dir(byte* path_ptr, nuint path_len, byte* schema_ptr, nuint schema_len, byte* settings_ptr, nuint settings_len, TdnIndex** @out, TdnString* err);
 
         /// <summary>
         ///  Opens an existing index directory, registering the custom analyzers saved with it.
@@ -53,6 +54,12 @@ namespace TantivyDotNet.Native
         internal static extern int tdn_index_schema(TdnIndex* index, TdnString* @out, TdnString* err);
 
         /// <summary>
+        ///  Returns the settings the index was created with, as settings JSON (see `settings`).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_index_settings", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_index_settings(TdnIndex* index, TdnString* @out, TdnString* err);
+
+        /// <summary>
         ///  Runs `text` through the index's tokenizer `name` (built-in or custom) and returns the token
         ///  texts as a JSON array of strings.
         /// </summary>
@@ -64,11 +71,12 @@ namespace TantivyDotNet.Native
 
         /// <summary>
         ///  Creates the index's writer. `num_threads == 0` lets Tantivy choose (up to 8, at least 15 MB
-        ///  of heap per thread). `flags` is a combination of `WRITER_*` bits. Only one writer may exist
-        ///  per index at a time.
+        ///  of heap per thread). `flags` is a combination of `WRITER_*` bits; the merge policy is merge
+        ///  policy JSON (see `merging`; empty = Tantivy's default). Only one writer may exist per index at
+        ///  a time.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_index_writer", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int tdn_index_writer(TdnIndex* index, nuint heap_bytes, nuint num_threads, uint flags, TdnWriter** @out, TdnString* err);
+        internal static extern int tdn_index_writer(TdnIndex* index, nuint heap_bytes, nuint num_threads, uint flags, byte* merge_policy_ptr, nuint merge_policy_len, TdnWriter** @out, TdnString* err);
 
         /// <summary>
         ///  Adds one document given as a JSON object (field name -&gt; value or array of values).
@@ -112,6 +120,20 @@ namespace TantivyDotNet.Native
         internal static extern int tdn_writer_rollback(TdnWriter* writer, TdnString* err);
 
         /// <summary>
+        ///  Merges the committed segments down to at most `max_segments`, also rewriting segments with
+        ///  deleted documents (see `merging::force_merge`). Blocks until done.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_writer_force_merge", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_writer_force_merge(TdnWriter* writer, uint max_segments, TdnString* err);
+
+        /// <summary>
+        ///  Deletes index files no longer used by the index or an open searcher; returns
+        ///  `{"deleted": [names], "failed": [names]}`.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_writer_garbage_collect", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_writer_garbage_collect(TdnWriter* writer, TdnString* @out, TdnString* err);
+
+        /// <summary>
         ///  Frees the writer without committing; uncommitted operations are discarded. Blocks until
         ///  background merges finish (`wait_merging_threads`), like Lucene's `IndexWriter.Dispose()`; a plain
         ///  drop would kill them, wasting their work and leaving orphan files until the next commit.
@@ -119,6 +141,14 @@ namespace TantivyDotNet.Native
         /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_writer_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void tdn_writer_free(TdnWriter* writer);
+
+        /// <summary>
+        ///  Like `tdn_writer_free`, but doesn't wait for background merges: they're abandoned, and their
+        ///  files are cleaned up by a later garbage collection. Used from the .NET finalizer, which must
+        ///  not block.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_writer_free_no_wait", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void tdn_writer_free_no_wait(TdnWriter* writer);
 
         /// <summary>
         ///  Creates a searcher over a snapshot of the latest commit. Searchers are thread-safe.
@@ -145,8 +175,31 @@ namespace TantivyDotNet.Native
         [DllImport(__DllName, EntryPoint = "tdn_searcher_explain", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int tdn_searcher_explain(TdnSearcher* searcher, byte* query_ptr, nuint query_len, uint segment_ord, uint doc_id, TdnString* @out, TdnString* err);
 
+        /// <summary>
+        ///  Returns statistics of the searcher's snapshot as stats JSON (see `stats`).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_searcher_stats", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_searcher_stats(TdnSearcher* searcher, TdnString* @out, TdnString* err);
+
         [DllImport(__DllName, EntryPoint = "tdn_searcher_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void tdn_searcher_free(TdnSearcher* searcher);
+
+        /// <summary>
+        ///  Creates a reader over the latest commit.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_index_reader", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_index_reader(TdnIndex* index, uint flags, TdnReader** @out, TdnString* err);
+
+        /// <summary>
+        ///  Returns a searcher over the reader's current snapshot, after reloading it first if `reload`
+        ///  is non-zero. If `current` (nullable) already covers the same segments and deletes, writes
+        ///  null instead, so callers can keep (and keep warm) the searcher they have.
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_reader_searcher", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_reader_searcher(TdnReader* reader, uint reload, TdnSearcher* current, TdnSearcher** @out, TdnString* err);
+
+        [DllImport(__DllName, EntryPoint = "tdn_reader_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern void tdn_reader_free(TdnReader* reader);
 
 
     }
@@ -178,6 +231,14 @@ namespace TantivyDotNet.Native
 
     [StructLayout(LayoutKind.Sequential)]
     internal unsafe partial struct TdnSearcher
+    {
+    }
+
+    /// <summary>
+    ///  A reader of its own, separate from `TdnIndex::reader`, backing a .NET `SearcherManager`.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe partial struct TdnReader
     {
     }
 

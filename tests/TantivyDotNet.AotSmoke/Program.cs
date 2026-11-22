@@ -105,6 +105,32 @@ try
     {
         Check(true, "query parse error throws QueryParseException");
     }
+
+    // Index lifecycle: settings, merge policy, force merge, GC, stats, searcher manager.
+    string lifecycleDir = Path.Combine(dir, "lifecycle");
+    var settings = new IndexSettings { DocStoreCompression = DocStoreCompression.Zstd, ZstdLevel = 5 };
+    using (var lifecycle = SearchIndex.Create(lifecycleDir, new SchemaBuilder().AddStringField("id", stored: true).Build(), settings))
+    {
+        using var manager = lifecycle.CreateSearcherManager(new SearcherManagerOptions { Warmer = s => s.Search(Query.All, limit: 1) });
+        using (var w = lifecycle.CreateWriter(new IndexWriterOptions { MergePolicy = MergePolicy.None, ThreadCount = 1 }))
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                w.AddDocument($$"""{"id": "l{{i}}"}""");
+                w.Commit();
+            }
+            Check(lifecycle.GetStats().SegmentCount == 3, "one segment per commit without merges");
+            w.ForceMerge();
+            w.GarbageCollectFiles();
+        }
+        var stats = lifecycle.GetStats();
+        Check(stats.SegmentCount == 1 && stats.DocumentCount == 3 && stats.SizeBytes > 0, $"stats after force merge: {stats}");
+        Check(manager.Refresh(), "searcher manager refresh");
+        using var lease = manager.Acquire();
+        Check(lease.Searcher.DocumentCount == 3, "leased searcher sees the commits");
+    }
+    using (var lifecycleReopened = SearchIndex.Open(lifecycleDir))
+        Check(lifecycleReopened.Settings.DocStoreCompression == DocStoreCompression.Zstd && lifecycleReopened.Settings.ZstdLevel == 5, "settings saved with the index");
 }
 catch (Exception e)
 {

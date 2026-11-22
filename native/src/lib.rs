@@ -20,11 +20,14 @@ mod analyzers;
 mod documents;
 mod facets;
 mod ffi;
+mod merging;
 mod query_spec;
 mod schema_spec;
 mod search;
+mod settings;
 mod snippets;
 mod sorting;
+mod stats;
 
 use std::sync::Mutex;
 
@@ -34,7 +37,7 @@ use tantivy::{DocAddress, Index, IndexReader, IndexWriter, ReloadPolicy, Searche
 use ffi::{guard, handle, str_arg, write_out, FfiError, FfiResult};
 
 /// Bumped whenever the exported C ABI changes; the managed side checks it on load.
-pub const ABI_VERSION: u32 = 4;
+pub const ABI_VERSION: u32 = 5;
 
 /// A Rust-owned UTF-8 buffer handed to the caller. Release with `tdn_string_free`.
 #[repr(C)]
@@ -66,11 +69,19 @@ pub struct TdnWriter {
     index: Index,
     schema: Schema,
     ignore_unknown_fields: bool,
+    /// Restored after `tdn_writer_force_merge`, which pauses background merges.
+    merge_policy: merging::MergePolicySpec,
 }
 
 pub struct TdnSearcher {
     index: Index,
     searcher: Searcher,
+}
+
+/// A reader of its own, separate from `TdnIndex::reader`, backing a .NET `SearcherManager`.
+pub struct TdnReader {
+    index: Index,
+    reader: IndexReader,
 }
 
 impl TdnIndex {
@@ -116,17 +127,22 @@ pub unsafe extern "C" fn tdn_string_free(s: TdnString) {
 // Index
 // ---------------------------------------------------------------------------------------------
 
-/// Creates an index in anonymous memory from schema JSON (see `schema_spec`).
+/// Creates an index in anonymous memory from schema JSON (see `schema_spec`) and settings JSON
+/// (see `settings`; empty = defaults).
 #[no_mangle]
 pub unsafe extern "C" fn tdn_index_create_in_ram(
     schema_ptr: *const u8,
     schema_len: usize,
+    settings_ptr: *const u8,
+    settings_len: usize,
     out: *mut *mut TdnIndex,
     err: *mut TdnString,
 ) -> i32 {
     guard(err, || {
         let (schema, analyzers) = schema_spec::schema_from_json(str_arg(schema_ptr, schema_len, "schema")?)?;
-        let index = TdnIndex::new(Index::create_in_ram(schema), analyzers)?;
+        let settings = settings::from_json(str_arg(settings_ptr, settings_len, "settings")?)?;
+        let created = Index::builder().schema(schema).settings(settings).create_in_ram()?;
+        let index = TdnIndex::new(created, analyzers)?;
         write_out(out, Box::into_raw(Box::new(index)), "index")
     })
 }
@@ -139,13 +155,16 @@ pub unsafe extern "C" fn tdn_index_create_in_dir(
     path_len: usize,
     schema_ptr: *const u8,
     schema_len: usize,
+    settings_ptr: *const u8,
+    settings_len: usize,
     out: *mut *mut TdnIndex,
     err: *mut TdnString,
 ) -> i32 {
     guard(err, || {
         let path = str_arg(path_ptr, path_len, "path")?;
         let (schema, analyzers) = schema_spec::schema_from_json(str_arg(schema_ptr, schema_len, "schema")?)?;
-        let created = Index::create_in_dir(path, schema)?;
+        let settings = settings::from_json(str_arg(settings_ptr, settings_len, "settings")?)?;
+        let created = Index::builder().schema(schema).settings(settings).create_in_dir(path)?;
         if !analyzers.is_empty() {
             analyzers::save(std::path::Path::new(path), &analyzers)?;
         }
@@ -185,6 +204,20 @@ pub unsafe extern "C" fn tdn_index_schema(
     })
 }
 
+/// Returns the settings the index was created with, as settings JSON (see `settings`).
+#[no_mangle]
+pub unsafe extern "C" fn tdn_index_settings(
+    index: *const TdnIndex,
+    out: *mut TdnString,
+    err: *mut TdnString,
+) -> i32 {
+    guard(err, || {
+        let index = handle(index, "index")?;
+        let json = settings::to_json(index.index.settings());
+        write_out(out, TdnString::from_string(json), "settings")
+    })
+}
+
 /// Runs `text` through the index's tokenizer `name` (built-in or custom) and returns the token
 /// texts as a JSON array of strings.
 #[no_mangle]
@@ -220,29 +253,38 @@ pub unsafe extern "C" fn tdn_index_free(index: *mut TdnIndex) {
 pub const WRITER_IGNORE_UNKNOWN_FIELDS: u32 = 1;
 
 /// Creates the index's writer. `num_threads == 0` lets Tantivy choose (up to 8, at least 15 MB
-/// of heap per thread). `flags` is a combination of `WRITER_*` bits. Only one writer may exist
-/// per index at a time.
+/// of heap per thread). `flags` is a combination of `WRITER_*` bits; the merge policy is merge
+/// policy JSON (see `merging`; empty = Tantivy's default). Only one writer may exist per index at
+/// a time.
 #[no_mangle]
 pub unsafe extern "C" fn tdn_index_writer(
     index: *const TdnIndex,
     heap_bytes: usize,
     num_threads: usize,
     flags: u32,
+    merge_policy_ptr: *const u8,
+    merge_policy_len: usize,
     out: *mut *mut TdnWriter,
     err: *mut TdnString,
 ) -> i32 {
     guard(err, || {
         let index = &handle(index, "index")?.index;
+        let merge_policy =
+            merging::MergePolicySpec::from_json(str_arg(merge_policy_ptr, merge_policy_len, "merge policy")?)?;
         let writer: IndexWriter = if num_threads == 0 {
             index.writer(heap_bytes)?
         } else {
             index.writer_with_num_threads(num_threads, heap_bytes)?
         };
+        if !matches!(merge_policy, merging::MergePolicySpec::Default) {
+            writer.set_merge_policy(merge_policy.build());
+        }
         let writer = TdnWriter {
             writer: Mutex::new(writer),
             index: index.clone(),
             schema: index.schema(),
             ignore_unknown_fields: flags & WRITER_IGNORE_UNKNOWN_FIELDS != 0,
+            merge_policy,
         };
         write_out(out, Box::into_raw(Box::new(writer)), "writer")
     })
@@ -348,6 +390,26 @@ pub unsafe extern "C" fn tdn_writer_rollback(writer: *const TdnWriter, err: *mut
     })
 }
 
+/// Merges the committed segments down to at most `max_segments`, also rewriting segments with
+/// deleted documents (see `merging::force_merge`). Blocks until done.
+#[no_mangle]
+pub unsafe extern "C" fn tdn_writer_force_merge(writer: *const TdnWriter, max_segments: u32, err: *mut TdnString) -> i32 {
+    guard(err, || {
+        let w = handle(writer, "writer")?;
+        merging::force_merge(&mut *w.lock()?, &w.index, &w.merge_policy, max_segments as usize)
+    })
+}
+
+/// Deletes index files no longer used by the index or an open searcher; returns
+/// `{"deleted": [names], "failed": [names]}`.
+#[no_mangle]
+pub unsafe extern "C" fn tdn_writer_garbage_collect(writer: *const TdnWriter, out: *mut TdnString, err: *mut TdnString) -> i32 {
+    guard(err, || {
+        let result = handle(writer, "writer")?.lock()?.garbage_collect_files().wait()?;
+        write_out(out, TdnString::from_string(merging::gc_to_json(result)), "result")
+    })
+}
+
 /// Frees the writer without committing; uncommitted operations are discarded. Blocks until
 /// background merges finish (`wait_merging_threads`), like Lucene's `IndexWriter.Dispose()`; a plain
 /// drop would kill them, wasting their work and leaving orphan files until the next commit.
@@ -362,6 +424,14 @@ pub unsafe extern "C" fn tdn_writer_free(writer: *mut TdnWriter) {
         let inner = writer.writer.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
         let _ = inner.wait_merging_threads();
     }));
+}
+
+/// Like `tdn_writer_free`, but doesn't wait for background merges: they're abandoned, and their
+/// files are cleaned up by a later garbage collection. Used from the .NET finalizer, which must
+/// not block.
+#[no_mangle]
+pub unsafe extern "C" fn tdn_writer_free_no_wait(writer: *mut TdnWriter) {
+    ffi::free_box(writer);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -426,7 +496,73 @@ pub unsafe extern "C" fn tdn_searcher_explain(
     })
 }
 
+/// Returns statistics of the searcher's snapshot as stats JSON (see `stats`).
+#[no_mangle]
+pub unsafe extern "C" fn tdn_searcher_stats(searcher: *const TdnSearcher, out: *mut TdnString, err: *mut TdnString) -> i32 {
+    guard(err, || {
+        let s = handle(searcher, "searcher")?;
+        write_out(out, TdnString::from_string(stats::to_json(&s.searcher)?), "stats")
+    })
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn tdn_searcher_free(searcher: *mut TdnSearcher) {
     ffi::free_box(searcher);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Reader (for SearcherManager)
+// ---------------------------------------------------------------------------------------------
+
+/// Reader flag for `tdn_index_reader`: reload in the background shortly after each commit
+/// (Tantivy's `OnCommitWithDelay`, which watches meta.json). Otherwise reloads are manual.
+pub const READER_RELOAD_ON_COMMIT: u32 = 1;
+
+/// Creates a reader over the latest commit.
+#[no_mangle]
+pub unsafe extern "C" fn tdn_index_reader(
+    index: *const TdnIndex,
+    flags: u32,
+    out: *mut *mut TdnReader,
+    err: *mut TdnString,
+) -> i32 {
+    guard(err, || {
+        let index = &handle(index, "index")?.index;
+        let policy = if flags & READER_RELOAD_ON_COMMIT != 0 { ReloadPolicy::OnCommitWithDelay } else { ReloadPolicy::Manual };
+        let reader = index.reader_builder().reload_policy(policy).try_into()?;
+        write_out(out, Box::into_raw(Box::new(TdnReader { index: index.clone(), reader })), "reader")
+    })
+}
+
+/// Returns a searcher over the reader's current snapshot, after reloading it first if `reload`
+/// is non-zero. If `current` (nullable) already covers the same segments and deletes, writes
+/// null instead, so callers can keep (and keep warm) the searcher they have.
+#[no_mangle]
+pub unsafe extern "C" fn tdn_reader_searcher(
+    reader: *const TdnReader,
+    reload: u32,
+    current: *const TdnSearcher,
+    out: *mut *mut TdnSearcher,
+    err: *mut TdnString,
+) -> i32 {
+    guard(err, || {
+        let r = handle(reader, "reader")?;
+        if reload != 0 {
+            r.reader.reload()?;
+        }
+        let searcher = r.reader.searcher();
+        if let Some(current) = current.as_ref() {
+            let (a, b) = (current.searcher.generation(), searcher.generation());
+            if a.generation_id() == b.generation_id() || a.segments() == b.segments() {
+                return write_out(out, std::ptr::null_mut(), "searcher");
+            }
+        }
+        let searcher = TdnSearcher { index: r.index.clone(), searcher };
+        write_out(out, Box::into_raw(Box::new(searcher)), "searcher")
+    })
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn tdn_reader_free(reader: *mut TdnReader) {
+    ffi::free_box(reader);
 }

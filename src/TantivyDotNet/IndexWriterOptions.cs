@@ -35,4 +35,18 @@ public sealed class IndexWriterOptions
     /// (field names are case-sensitive, so <c>new { Title = "x" }</c> doesn't fill a <c>title</c> field).
     /// </summary>
     public bool IgnoreUnknownFields { get; init; }
+
+    /// <summary>
+    /// When to merge segments in the background. Default <see cref="TantivyDotNet.MergePolicy.Default"/>
+    /// (a <see cref="LogMergePolicy"/>); <see cref="TantivyDotNet.MergePolicy.None"/> turns background merging off.
+    /// </summary>
+    public MergePolicy MergePolicy
+    {
+        get;
+        init
+        {
+            ArgumentNullException.ThrowIfNull(value);
+            field = value;
+        }
+    } = MergePolicy.Default;
 }
