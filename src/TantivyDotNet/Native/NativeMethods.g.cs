@@ -111,14 +111,13 @@ namespace TantivyDotNet.Native
         internal static extern ulong tdn_searcher_num_docs(TdnSearcher* searcher);
 
         /// <summary>
-        ///  Parses `query` with Tantivy's query language and returns
+        ///  Runs a search described by request JSON (see `query_spec` for the query part):
+        ///  `{"query": {...}, "limit": n, "offset": n}`, and returns
         ///  `{"count": &lt;total matches&gt;, "hits": [{"score": f, "doc": {"field": [values...]}}]}`.
-        ///
-        ///  `default_fields_json` is a JSON array of field names used for terms without a `field:` prefix;
-        ///  empty means every indexed text field. `limit == 0` only counts.
+        ///  `limit == 0` only counts.
         /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_searcher_search", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
-        internal static extern int tdn_searcher_search(TdnSearcher* searcher, byte* query_ptr, nuint query_len, byte* default_fields_ptr, nuint default_fields_len, nuint limit, nuint offset, TdnString* @out, TdnString* err);
+        internal static extern int tdn_searcher_search(TdnSearcher* searcher, byte* request_ptr, nuint request_len, TdnString* @out, TdnString* err);
 
         [DllImport(__DllName, EntryPoint = "tdn_searcher_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void tdn_searcher_free(TdnSearcher* searcher);

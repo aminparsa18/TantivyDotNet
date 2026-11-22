@@ -35,6 +35,16 @@ foreach (var hit in hits)
     Console.WriteLine($"{hit.Score} {hit.Document.GetString("title")}");
 ```
 
+Queries can also be built in code and mixed with parsed ones:
+
+```csharp
+var query = Query.Phrase("body", "of mice", slop: 1)            // analyzed with the field's tokenizer
+          & Query.Range("year", 1930, 1940)                     // inclusive bounds, null = open
+          & !Query.Term("title", "draft")                       // exact term, not analyzed
+          | Query.Fuzzy("title", "mise", distance: 1).Boost(2); // also Query.Parse("..."), Query.All, Query.Boolean(...)
+var results = searcher.Search(query);
+```
+
 Some behavior to know about:
 
 - **Thread safety.** `SearchIndex` and `Searcher` are thread-safe, so share one searcher across threads. `IndexWriter` is not thread-safe; use it from one thread at a time (it already indexes on several threads internally). Only one writer can be open per index at a time.

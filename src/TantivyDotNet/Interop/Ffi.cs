@@ -7,7 +7,7 @@ namespace TantivyDotNet.Interop;
 internal static unsafe class Ffi
 {
     /// <summary>Must match <c>ABI_VERSION</c> in native/src/lib.rs.</summary>
-    internal const uint ExpectedAbiVersion = 2;
+    internal const uint ExpectedAbiVersion = 3;
 
     private static volatile bool s_abiChecked;
 

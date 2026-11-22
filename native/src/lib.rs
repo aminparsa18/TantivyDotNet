@@ -16,22 +16,23 @@
 #![allow(clippy::missing_safety_doc)] // covered once by the crate-level section above
 
 mod ffi;
+mod query_spec;
 mod schema_spec;
 
 use std::sync::Mutex;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tantivy::collector::{Count, TopDocs};
-use tantivy::query::QueryParser;
 use tantivy::schema::{Field, FieldType, NamedFieldDocument, Schema};
 use tantivy::{
     Document, Index, IndexReader, IndexWriter, ReloadPolicy, Searcher, TantivyDocument, Term,
 };
 
+use query_spec::QuerySpec;
 use ffi::{guard, handle, str_arg, write_out, FfiError, FfiResult};
 
 /// Bumped whenever the exported C ABI changes; the managed side checks it on load.
-pub const ABI_VERSION: u32 = 2;
+pub const ABI_VERSION: u32 = 3;
 
 /// A Rust-owned UTF-8 buffer handed to the caller. Release with `tdn_string_free`.
 #[repr(C)]
@@ -351,45 +352,43 @@ struct HitJson {
     doc: NamedFieldDocument,
 }
 
-/// Parses `query` with Tantivy's query language and returns
+#[derive(Deserialize)]
+struct SearchRequest {
+    query: QuerySpec,
+    #[serde(default = "default_limit")]
+    limit: usize,
+    #[serde(default)]
+    offset: usize,
+}
+
+fn default_limit() -> usize {
+    10
+}
+
+/// Runs a search described by request JSON (see `query_spec` for the query part):
+/// `{"query": {...}, "limit": n, "offset": n}`, and returns
 /// `{"count": <total matches>, "hits": [{"score": f, "doc": {"field": [values...]}}]}`.
-///
-/// `default_fields_json` is a JSON array of field names used for terms without a `field:` prefix;
-/// empty means every indexed text field. `limit == 0` only counts.
+/// `limit == 0` only counts.
 #[no_mangle]
 pub unsafe extern "C" fn tdn_searcher_search(
     searcher: *const TdnSearcher,
-    query_ptr: *const u8,
-    query_len: usize,
-    default_fields_ptr: *const u8,
-    default_fields_len: usize,
-    limit: usize,
-    offset: usize,
+    request_ptr: *const u8,
+    request_len: usize,
     out: *mut TdnString,
     err: *mut TdnString,
 ) -> i32 {
     guard(err, || {
         let s = handle(searcher, "searcher")?;
-        let query_text = str_arg(query_ptr, query_len, "query")?;
-        let default_fields_json = str_arg(default_fields_ptr, default_fields_len, "default fields")?;
+        let request_json = str_arg(request_ptr, request_len, "search request")?;
+        let request: SearchRequest = serde_json::from_str(request_json)
+            .map_err(|e| FfiError::invalid(format!("invalid search request JSON: {e}")))?;
         let schema = s.index.schema();
+        let query = query_spec::build(&request.query, &s.index)?;
 
-        let default_fields = if default_fields_json.is_empty() {
-            all_indexed_text_fields(&schema)
-        } else {
-            let names: Vec<String> = serde_json::from_str(default_fields_json)
-                .map_err(|e| FfiError::invalid(format!("invalid default fields JSON: {e}")))?;
-            names.iter().map(|n| schema.get_field(n)).collect::<Result<Vec<_>, _>>()?
-        };
-
-        let query = QueryParser::for_index(&s.index, default_fields)
-            .parse_query(query_text)
-            .map_err(|e| FfiError::new(ffi::status::QUERY_PARSE, e.to_string()))?;
-
-        let (top, count) = if limit == 0 {
+        let (top, count) = if request.limit == 0 {
             (Vec::new(), s.searcher.search(&query, &Count)?)
         } else {
-            let top_docs = TopDocs::with_limit(limit).and_offset(offset).order_by_score();
+            let top_docs = TopDocs::with_limit(request.limit).and_offset(request.offset).order_by_score();
             s.searcher.search(&query, &(top_docs, Count))?
         };
 
@@ -405,14 +404,6 @@ pub unsafe extern "C" fn tdn_searcher_search(
             .map_err(|e| FfiError::new(ffi::status::ERROR, format!("result serialization: {e}")))?;
         write_out(out, TdnString::from_string(json), "result")
     })
-}
-
-fn all_indexed_text_fields(schema: &Schema) -> Vec<Field> {
-    schema
-        .fields()
-        .filter(|(_, e)| matches!(e.field_type(), FieldType::Str(_)) && e.is_indexed())
-        .map(|(f, _)| f)
-        .collect()
 }
 
 #[no_mangle]
