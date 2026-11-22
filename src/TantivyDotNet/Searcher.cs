@@ -57,7 +57,7 @@ public sealed unsafe class Searcher : IDisposable
     /// <summary>
     /// Parses <paramref name="query"/> with Tantivy's query language (unprefixed terms search every
     /// indexed text field) and runs it with <paramref name="options"/>. To choose the default fields,
-    /// use <see cref="Search(Query, SearchOptions)"/> with <see cref="Query.Parse"/>.
+    /// use <see cref="Search(Query, SearchOptions)"/> with <see cref="Query.Parse(string, QueryParserOptions)"/>.
     /// </summary>
     /// <param name="query">The query text; see <see cref="Search(string, int, int, IEnumerable{string}?)"/>.</param>
     /// <param name="options">Paging, ordering, snippets and facets.</param>

@@ -7,7 +7,7 @@ namespace TantivyDotNet;
 /// <summary>
 /// A query built in code, passed to <see cref="Searcher.Search(Query, SearchOptions)"/>. Create one with
 /// the static factories (<see cref="Term(string, string)"/>, <see cref="Phrase"/>, <see cref="Fuzzy"/>,
-/// <see cref="Boolean"/>, <see cref="Range(string, long?, long?, bool, bool)"/>, <see cref="Parse"/>, ...)
+/// <see cref="Boolean"/>, <see cref="Range(string, long?, long?, bool, bool)"/>, <see cref="Parse(string, QueryParserOptions)"/>, ...)
 /// and combine them with <c>&amp;</c>, <c>|</c> and <c>!</c>.
 /// </summary>
 /// <remarks>
@@ -36,7 +36,7 @@ public abstract class Query
     /// <remarks>
     /// The value is <b>not</b> analyzed: with the default tokenizer, text is indexed lowercased, so
     /// <c>Term("title", "Mice")</c> matches nothing while <c>Term("title", "mice")</c> does. Use
-    /// <see cref="Phrase"/> or <see cref="Parse"/> to have the text analyzed, or a string field
+    /// <see cref="Phrase"/> or <see cref="Parse(string, QueryParserOptions)"/> to have the text analyzed, or a string field
     /// (<see cref="SchemaBuilder.AddStringField"/>) for exact identifiers.
     /// </remarks>
     public static TermQuery Term(string field, string value) => new(field, NotNull(value));
@@ -171,12 +171,20 @@ public abstract class Query
     /// <param name="text">The query text; see <see cref="Searcher.Search(string, int, int, IEnumerable{string}?)"/>.</param>
     /// <param name="defaultFields">Fields searched by terms without a <c>field:</c> prefix. Null means every indexed text field.</param>
     /// <remarks>Syntax errors throw <see cref="QueryParseException"/> when the query runs.</remarks>
-    public static ParsedQuery Parse(string text, IEnumerable<string>? defaultFields = null)
+    public static ParsedQuery Parse(string text, IEnumerable<string>? defaultFields = null) =>
+        new(NotNull(text), defaultFields is null ? QueryParserOptions.Default : new QueryParserOptions { DefaultFields = [.. defaultFields] });
+
+    /// <summary>
+    /// A query in Tantivy's query language, parsed with <paramref name="options"/>: default fields
+    /// and operator, per-field boosts and fuzziness, and lenient parsing for user input.
+    /// </summary>
+    /// <param name="text">The query text; see <see cref="Searcher.Search(string, int, int, IEnumerable{string}?)"/>.</param>
+    /// <param name="options">The parser settings.</param>
+    /// <remarks>Unless <see cref="QueryParserOptions.Lenient"/>, syntax errors throw <see cref="QueryParseException"/> when the query runs.</remarks>
+    public static ParsedQuery Parse(string text, QueryParserOptions options)
     {
-        string[]? fields = defaultFields?.ToArray();
-        if (fields is not null && Array.IndexOf(fields, null) >= 0)
-            throw new ArgumentException("Field names can't be null.", nameof(defaultFields));
-        return new ParsedQuery(NotNull(text), fields);
+        ArgumentNullException.ThrowIfNull(options);
+        return new ParsedQuery(NotNull(text), options);
     }
 
     /// <summary>Multiplies this query's scores by <paramref name="factor"/>, to weight it within a <see cref="Boolean"/>.</summary>
@@ -526,34 +534,30 @@ public sealed class BoostQuery : Query
     }
 }
 
-/// <summary>A query in Tantivy's query language. Created by <see cref="Query.Parse"/>.</summary>
+/// <summary>A query in Tantivy's query language. Created by <see cref="Query.Parse(string, QueryParserOptions)"/>.</summary>
 public sealed class ParsedQuery : Query
 {
-    private readonly string[]? _defaultFields;
-
-    internal ParsedQuery(string text, string[]? defaultFields)
+    internal ParsedQuery(string text, QueryParserOptions options)
     {
         Text = text;
-        _defaultFields = defaultFields;
+        Options = options;
     }
 
     /// <summary>The query text.</summary>
     public string Text { get; }
 
+    /// <summary>The parser settings.</summary>
+    public QueryParserOptions Options { get; }
+
     /// <summary>Fields searched by unprefixed terms, or null for every indexed text field.</summary>
-    public IReadOnlyList<string>? DefaultFields => _defaultFields;
+    public IReadOnlyList<string>? DefaultFields => Options.DefaultFields;
 
     internal override void WriteJson(Utf8JsonWriter w)
     {
         w.WriteStartObject();
         w.WriteString("type", "parse");
         w.WriteString("text", Text);
-        if (_defaultFields is not null)
-        {
-            w.WriteStartArray("default_fields");
-            foreach (var f in _defaultFields) w.WriteStringValue(f);
-            w.WriteEndArray();
-        }
+        Options.WriteJson(w);
         w.WriteEndObject();
     }
 }

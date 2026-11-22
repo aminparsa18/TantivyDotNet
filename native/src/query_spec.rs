@@ -13,6 +13,7 @@
 //! microseconds, `bytes` as an array of numbers, `facet` as a path) and converted to the field's type when that is
 //! lossless, so `Term("year", 1937)` (an `i64` in C#) works on a `u64` field.
 
+use std::collections::BTreeMap;
 use std::ops::Bound;
 
 use serde::Deserialize;
@@ -68,7 +69,26 @@ pub enum QuerySpec {
     Parse {
         text: String,
         default_fields: Option<Vec<String>>,
+        /// Combine unprefixed terms with AND instead of OR.
+        #[serde(default)]
+        conjunction: bool,
+        #[serde(default)]
+        boosts: BTreeMap<String, f32>,
+        #[serde(default)]
+        fuzzy: BTreeMap<String, FuzzySpec>,
+        /// Drop unparsable parts instead of failing.
+        #[serde(default)]
+        lenient: bool,
     },
+}
+
+#[derive(Deserialize)]
+pub struct FuzzySpec {
+    distance: u8,
+    #[serde(default = "default_true")]
+    transpositions: bool,
+    #[serde(default)]
+    prefix: bool,
 }
 
 #[derive(Deserialize)]
@@ -198,14 +218,37 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
             Box::new(BoostQuery::new(build(query, index)?, *factor))
         }
 
-        QuerySpec::Parse { text, default_fields } => {
+        QuerySpec::Parse { text, default_fields, conjunction, boosts, fuzzy, lenient } => {
             let fields = match default_fields {
                 None => all_indexed_text_fields(&schema),
                 Some(names) => names.iter().map(|n| schema.get_field(n)).collect::<Result<Vec<_>, _>>()?,
             };
-            QueryParser::for_index(index, fields)
-                .parse_query(text)
-                .map_err(|e| FfiError::new(ffi::status::QUERY_PARSE, e.to_string()))?
+            let mut parser = QueryParser::for_index(index, fields);
+            if *conjunction {
+                parser.set_conjunction_by_default();
+            }
+            for (name, boost) in boosts {
+                if !boost.is_finite() {
+                    return Err(FfiError::invalid(format!("boost for field '{name}' must be finite, got {boost}")));
+                }
+                parser.set_field_boost(schema.get_field(name)?, *boost);
+            }
+            for (name, f) in fuzzy {
+                let (field, ft) = indexed_field(&schema, name)?;
+                require_text(name, ft, "fuzzy")?;
+                if f.distance > MAX_FUZZY_DISTANCE {
+                    return Err(FfiError::invalid(format!(
+                        "fuzzy distance must be between 0 and {MAX_FUZZY_DISTANCE}, got {}",
+                        f.distance
+                    )));
+                }
+                parser.set_field_fuzzy(field, f.prefix, f.distance, f.transpositions);
+            }
+            if *lenient {
+                parser.parse_query_lenient(text).0
+            } else {
+                parser.parse_query(text).map_err(|e| FfiError::new(ffi::status::QUERY_PARSE, e.to_string()))?
+            }
         }
     })
 }
