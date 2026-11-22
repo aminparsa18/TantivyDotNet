@@ -10,7 +10,7 @@
 //! ```
 //!
 //! Term values are tagged with their kind (`str`, `u64`, `i64`, `f64`, `bool`, `date` as Unix
-//! microseconds, `bytes` as an array of numbers) and converted to the field's type when that is
+//! microseconds, `bytes` as an array of numbers, `facet` as a path) and converted to the field's type when that is
 //! lossless, so `Term("year", 1937)` (an `i64` in C#) works on a `u64` field.
 
 use std::ops::Bound;
@@ -82,6 +82,8 @@ pub enum ValueSpec {
     /// Unix timestamp in microseconds (UTC).
     Date(i64),
     Bytes(Vec<u8>),
+    /// A facet path; only valid on facet fields (unlike `Str`, which also is).
+    Facet(String),
 }
 
 #[derive(Deserialize)]
@@ -260,6 +262,7 @@ fn make_term(field: Field, name: &str, ft: &FieldType, value: &ValueSpec) -> Ffi
             Term::from_field_date_for_search(field, DateTime::from_timestamp_micros(*us))
         }
         (FieldType::Bytes(_), V::Bytes(b)) => Term::from_field_bytes(field, b),
+        (FieldType::Facet(_), V::Str(s) | V::Facet(s)) => Term::from_facet(field, &crate::facets::parse_facet(s)?),
         _ => {
             return Err(FfiError::invalid(format!(
                 "field '{name}' is {} and can't be queried with {}",
@@ -280,6 +283,7 @@ fn type_name(ft: &FieldType) -> &'static str {
         FieldType::Bool(_) => "a bool field",
         FieldType::Date(_) => "a date field",
         FieldType::Bytes(_) => "a bytes field",
+        FieldType::Facet(_) => "a facet field",
         _ => "a field type that is not supported here",
     }
 }
@@ -293,5 +297,6 @@ fn value_name(v: &ValueSpec) -> String {
         ValueSpec::Bool(_) => "a bool".into(),
         ValueSpec::Date(_) => "a date".into(),
         ValueSpec::Bytes(_) => "bytes".into(),
+        ValueSpec::Facet(p) => format!("the facet path '{p}'"),
     }
 }

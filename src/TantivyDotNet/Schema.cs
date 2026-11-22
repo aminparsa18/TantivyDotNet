@@ -20,7 +20,7 @@ public enum FieldType
     Date,
     /// <summary>Raw bytes (base64 in JSON documents).</summary>
     Bytes,
-    /// <summary>Hierarchical facet. Not yet creatable from .NET.</summary>
+    /// <summary>Hierarchical category path such as <c>/genre/fiction</c>; see <see cref="SchemaBuilder.AddFacetField"/>.</summary>
     Facet,
     /// <summary>Dynamic JSON object. Not yet creatable from .NET.</summary>
     Json,
@@ -114,6 +114,7 @@ public sealed class Schema
         FieldType.Bool => "bool",
         FieldType.Date => "date",
         FieldType.Bytes => "bytes",
+        FieldType.Facet => "facet",
         _ => throw new NotSupportedException($"Creating {type} fields isn't supported yet."),
     };
 
@@ -207,6 +208,18 @@ public sealed class SchemaBuilder
     /// <summary>Adds a bytes field. In JSON documents, values are base64 strings.</summary>
     public SchemaBuilder AddBytesField(string name, bool stored = false, bool indexed = true, bool fast = false) =>
         Add(new FieldDefinition(name, FieldType.Bytes, stored, indexed, fast, null));
+
+    /// <summary>
+    /// Adds a facet field: hierarchical category paths like <c>/genre/fiction/classic</c>, used for
+    /// filtering (<see cref="Query.Facet"/>) and counting (<see cref="FacetRequest"/>). In JSON
+    /// documents a value is a path string, or an array of them for several categories. Paths start
+    /// with <c>/</c>; a <c>/</c> inside a segment is escaped as <c>\/</c>. Facet fields are always
+    /// indexed and fast.
+    /// </summary>
+    /// <param name="name">Field name.</param>
+    /// <param name="stored">Return the paths in search hits.</param>
+    public SchemaBuilder AddFacetField(string name, bool stored = false) =>
+        Add(new FieldDefinition(name, FieldType.Facet, stored, Indexed: true, Fast: true, null));
 
     /// <summary>Creates the schema. The builder can keep being used afterwards.</summary>
     /// <exception cref="InvalidOperationException">No fields were added.</exception>

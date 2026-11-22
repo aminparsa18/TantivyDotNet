@@ -6,6 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- csbindgen emits `unsafe` extern declarations -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- Ships the XML docs and makes the compiler check every cref and flag undocumented public API. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
     <NativeDir>$(MSBuildThisFileDirectory)../../native/</NativeDir>
     <NativeProfile Condition="'$(Configuration)' == 'Release'">release</NativeProfile>

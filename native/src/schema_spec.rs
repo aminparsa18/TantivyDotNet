@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 use tantivy::schema::{
-    BytesOptions, DateOptions, FieldType, IndexRecordOption, NumericOptions, Schema,
+    BytesOptions, DateOptions, FacetOptions, FieldType, IndexRecordOption, NumericOptions, Schema,
     TextFieldIndexing, TextOptions,
 };
 
@@ -88,6 +88,14 @@ pub fn schema_from_json(json: &str) -> FfiResult<Schema> {
                     opts = opts.set_fast();
                 }
                 builder.add_date_field(name, opts);
+            }
+            "facet" => {
+                // Facets are always indexed and fast in Tantivy; only `stored` is optional.
+                let mut opts = FacetOptions::default();
+                if spec.stored {
+                    opts = opts.set_stored();
+                }
+                builder.add_facet_field(name, opts);
             }
             "bytes" => {
                 let mut opts = BytesOptions::default();

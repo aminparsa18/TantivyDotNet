@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace TantivyDotNet;
 
 /// <summary>
-/// A query built in code, passed to <see cref="Searcher.Search(Query, int, int, SnippetOptions?)"/>. Create one with
+/// A query built in code, passed to <see cref="Searcher.Search(Query, int, int, SnippetOptions?, IEnumerable{FacetRequest}?)"/>. Create one with
 /// the static factories (<see cref="Term(string, string)"/>, <see cref="Phrase"/>, <see cref="Fuzzy"/>,
 /// <see cref="Boolean"/>, <see cref="Range(string, long?, long?, bool, bool)"/>, <see cref="Parse"/>, ...)
 /// and combine them with <c>&amp;</c>, <c>|</c> and <c>!</c>.
@@ -68,6 +68,20 @@ public abstract class Query
 
     /// <inheritdoc cref="Term(string, string)" path="/summary"/>
     public static TermQuery Term(string field, ReadOnlySpan<byte> value) => new(field, value.ToArray());
+
+    /// <summary>
+    /// Matches documents in the facet category <paramref name="path"/> or any category below it:
+    /// <c>Facet("genre", "/fiction")</c> matches <c>/fiction</c> and <c>/fiction/classic</c>.
+    /// </summary>
+    /// <param name="field">A facet field (<see cref="SchemaBuilder.AddFacetField"/>).</param>
+    /// <param name="path">A path starting with <c>/</c>.</param>
+    public static FacetQuery Facet(string field, string path)
+    {
+        ArgumentNullException.ThrowIfNull(field);
+        ArgumentNullException.ThrowIfNull(path);
+        if (!path.StartsWith('/')) throw new ArgumentException("Facet paths start with '/', like \"/genre/fiction\".", nameof(path));
+        return new FacetQuery(field, path);
+    }
 
     /// <summary>
     /// Matches terms of a text <paramref name="field"/> within <paramref name="distance"/> edits
@@ -154,7 +168,7 @@ public abstract class Query
     /// A query in Tantivy's query language, for example <c>body:mice AND year:[1930 TO 1940]</c>.
     /// Combine it with built queries like any other query.
     /// </summary>
-    /// <param name="text">The query text; see <see cref="Searcher.Search(string, int, int, IEnumerable{string}?, SnippetOptions?)"/>.</param>
+    /// <param name="text">The query text; see <see cref="Searcher.Search(string, int, int, IEnumerable{string}?, SnippetOptions?, IEnumerable{FacetRequest}?)"/>.</param>
     /// <param name="defaultFields">Fields searched by terms without a <c>field:</c> prefix. Null means every indexed text field.</param>
     /// <remarks>Syntax errors throw <see cref="QueryParseException"/> when the query runs.</remarks>
     public static ParsedQuery Parse(string text, IEnumerable<string>? defaultFields = null)
@@ -299,6 +313,33 @@ public sealed class TermQuery : Query
         w.WriteString("field", Field);
         w.WritePropertyName("value");
         WriteValue(w, Value);
+        w.WriteEndObject();
+    }
+}
+
+/// <summary>A facet-category match. Created by <see cref="Query.Facet"/>.</summary>
+public sealed class FacetQuery : Query
+{
+    internal FacetQuery(string field, string path)
+    {
+        Field = field;
+        Path = path;
+    }
+
+    /// <summary>The facet field searched.</summary>
+    public string Field { get; }
+
+    /// <summary>The category path; documents in it or below it match.</summary>
+    public string Path { get; }
+
+    internal override void WriteJson(Utf8JsonWriter w)
+    {
+        w.WriteStartObject();
+        w.WriteString("type", "term");
+        w.WriteString("field", Field);
+        w.WriteStartObject("value");
+        w.WriteString("facet", Path);
+        w.WriteEndObject();
         w.WriteEndObject();
     }
 }

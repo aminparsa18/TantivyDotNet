@@ -54,6 +54,15 @@ s.ToHtml();                                            // "...a farm with <b>rab
 foreach (Range r in s.Highlights) Console.WriteLine(s.Fragment[r]);
 ```
 
+Facets are hierarchical categories (`.AddFacetField("genre")`, documents hold paths like `"/fiction/novel"`) that you can filter on and count:
+
+```csharp
+var results = searcher.Search(Query.Parse("war") & Query.Facet("genre", "/fiction"),
+                              facets: [new FacetRequest("genre", "/fiction") { Top = 5 }]);
+foreach (var (path, count) in results.Facets["genre"])  // counts over all matches, not just this page
+    Console.WriteLine($"{path}: {count}");              // /fiction/novel: 12 ...
+```
+
 Some behavior to know about:
 
 - **Thread safety.** `SearchIndex` and `Searcher` are thread-safe, so share one searcher across threads. `IndexWriter` is not thread-safe; use it from one thread at a time (it already indexes on several threads internally). Only one writer can be open per index at a time.

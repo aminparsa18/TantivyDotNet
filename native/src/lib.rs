@@ -15,6 +15,7 @@
 //! writable. The .NET layer upholds this via `SafeHandle` leases and `fixed` buffers.
 #![allow(clippy::missing_safety_doc)] // covered once by the crate-level section above
 
+mod facets;
 mod ffi;
 mod query_spec;
 mod schema_spec;
@@ -24,12 +25,13 @@ use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tantivy::collector::{Count, TopDocs};
+use tantivy::collector::{Count, MultiCollector, TopDocs};
 use tantivy::schema::{Field, FieldType, NamedFieldDocument, Schema};
 use tantivy::{
     Document, Index, IndexReader, IndexWriter, ReloadPolicy, Searcher, TantivyDocument, Term,
 };
 
+use facets::{FacetRequest, FacetResultJson};
 use query_spec::QuerySpec;
 use snippets::{SnippetJson, SnippetRequest, Snippets};
 use ffi::{guard, handle, str_arg, write_out, FfiError, FfiResult};
@@ -347,6 +349,8 @@ pub unsafe extern "C" fn tdn_searcher_num_docs(searcher: *const TdnSearcher) -> 
 struct SearchResultJson {
     count: usize,
     hits: Vec<HitJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    facets: Option<FacetResultJson>,
 }
 
 #[derive(Serialize)]
@@ -366,6 +370,8 @@ struct SearchRequest {
     offset: usize,
     #[serde(default)]
     snippets: Option<SnippetRequest>,
+    #[serde(default)]
+    facets: Option<Vec<FacetRequest>>,
 }
 
 fn default_limit() -> usize {
@@ -373,9 +379,9 @@ fn default_limit() -> usize {
 }
 
 /// Runs a search described by request JSON (see `query_spec` for the query part):
-/// `{"query": {...}, "limit": n, "offset": n, "snippets": {...}?}`, and returns
-/// `{"count": <total matches>, "hits": [{"score": f, "doc": {"field": [values...]}, "snippets": {...}?}]}`
-/// (see `snippets` for the snippet parts).
+/// `{"query": {...}, "limit": n, "offset": n, "snippets": {...}?, "facets": [...]?}`, and returns
+/// `{"count": <total matches>, "hits": [{"score": f, "doc": {"field": [values...]}, "snippets": {...}?}], "facets": {...}?}`
+/// (see the `snippets` and `facets` modules for those parts).
 /// `limit == 0` only counts.
 #[no_mangle]
 pub unsafe extern "C" fn tdn_searcher_search(
@@ -393,12 +399,20 @@ pub unsafe extern "C" fn tdn_searcher_search(
         let schema = s.index.schema();
         let query = query_spec::build(&request.query, &s.index)?;
 
-        let (top, count) = if request.limit == 0 {
-            (Vec::new(), s.searcher.search(&query, &Count)?)
-        } else {
-            let top_docs = TopDocs::with_limit(request.limit).and_offset(request.offset).order_by_score();
-            s.searcher.search(&query, &(top_docs, Count))?
+        let mut collectors = MultiCollector::new();
+        let count_handle = collectors.add_collector(Count);
+        let top_handle = (request.limit > 0).then(|| {
+            collectors.add_collector(TopDocs::with_limit(request.limit).and_offset(request.offset).order_by_score())
+        });
+        let facet_plans = match &request.facets {
+            Some(f) => facets::add(f, &schema, &mut collectors)?,
+            None => Vec::new(),
         };
+
+        let mut fruits = s.searcher.search(&query, &collectors)?;
+        let count = count_handle.extract(&mut fruits);
+        let top = top_handle.map(|h| h.extract(&mut fruits)).unwrap_or_default();
+        let facets = request.facets.is_some().then(|| facets::collect(facet_plans, &mut fruits));
 
         // Built even with no hits, so an invalid snippet field fails consistently.
         let snippets = request
@@ -415,7 +429,7 @@ pub unsafe extern "C" fn tdn_searcher_search(
             })
             .collect::<FfiResult<Vec<_>>>()?;
 
-        let json = serde_json::to_string(&SearchResultJson { count, hits })
+        let json = serde_json::to_string(&SearchResultJson { count, hits, facets })
             .map_err(|e| FfiError::new(ffi::status::ERROR, format!("result serialization: {e}")))?;
         write_out(out, TdnString::from_string(json), "result")
     })

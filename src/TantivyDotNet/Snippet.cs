@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace TantivyDotNet;
 
 /// <summary>
-/// Asks <see cref="Searcher.Search(Query, int, int, SnippetOptions?)"/> to compute a
+/// Asks <see cref="Searcher.Search(Query, int, int, SnippetOptions?, IEnumerable{FacetRequest}?)"/> to compute a
 /// <see cref="Snippet"/> for each hit, for each of <see cref="Fields"/>.
 /// </summary>
 /// <example>
