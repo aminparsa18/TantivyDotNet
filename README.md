@@ -141,7 +141,11 @@ A local `dotnet pack src/TantivyDotNet -c Release` produces a package with only 
 2. One job packs the libraries with `-p:SkipNativeBuild=true -p:NativeAssetsDir=<dir with one sub-folder per RID> -p:RequireAllNativeAssets=true`.
 3. On each of the five platforms, the tests and the NativeAOT smoke app are built against the packed `.nupkg` (`-p:TantivyPackageVersion=<version> -p:TantivyPackageSource=<folder>`) and run.
 
-The package is uploaded as a workflow artifact. To try a local package the same way:
+The package is uploaded as a workflow artifact.
+
+To release, push a version tag (`git tag v0.1.0-preview.1 && git push origin v0.1.0-preview.1`). `publish.yml` runs the whole pipeline above for that tag, then pushes the tested package to nuget.org with [trusted publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing), so no API key is stored. The tag without its `v` becomes the package version.
+
+To try a local package the same way:
 
 ```sh
 dotnet pack src/TantivyDotNet -c Release -o artifacts/packages -p:Version=0.1.0-local.1
