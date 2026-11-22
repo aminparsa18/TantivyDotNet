@@ -5,7 +5,7 @@ using System.Text.Json;
 namespace TantivyDotNet;
 
 /// <summary>
-/// A query built in code, passed to <see cref="Searcher.Search(Query, int, int, SnippetOptions?, IEnumerable{FacetRequest}?)"/>. Create one with
+/// A query built in code, passed to <see cref="Searcher.Search(Query, SearchOptions)"/>. Create one with
 /// the static factories (<see cref="Term(string, string)"/>, <see cref="Phrase"/>, <see cref="Fuzzy"/>,
 /// <see cref="Boolean"/>, <see cref="Range(string, long?, long?, bool, bool)"/>, <see cref="Parse"/>, ...)
 /// and combine them with <c>&amp;</c>, <c>|</c> and <c>!</c>.
@@ -168,7 +168,7 @@ public abstract class Query
     /// A query in Tantivy's query language, for example <c>body:mice AND year:[1930 TO 1940]</c>.
     /// Combine it with built queries like any other query.
     /// </summary>
-    /// <param name="text">The query text; see <see cref="Searcher.Search(string, int, int, IEnumerable{string}?, SnippetOptions?, IEnumerable{FacetRequest}?)"/>.</param>
+    /// <param name="text">The query text; see <see cref="Searcher.Search(string, int, int, IEnumerable{string}?)"/>.</param>
     /// <param name="defaultFields">Fields searched by terms without a <c>field:</c> prefix. Null means every indexed text field.</param>
     /// <remarks>Syntax errors throw <see cref="QueryParseException"/> when the query runs.</remarks>
     public static ParsedQuery Parse(string text, IEnumerable<string>? defaultFields = null)

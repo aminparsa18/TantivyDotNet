@@ -4,12 +4,12 @@ using System.Text.Json;
 namespace TantivyDotNet;
 
 /// <summary>
-/// Asks <see cref="Searcher.Search(Query, int, int, SnippetOptions?, IEnumerable{FacetRequest}?)"/> to compute a
+/// Asks <see cref="Searcher.Search(Query, SearchOptions)"/> to compute a
 /// <see cref="Snippet"/> for each hit, for each of <see cref="Fields"/>.
 /// </summary>
 /// <example>
 /// <code>
-/// var results = searcher.Search(query, snippets: new SnippetOptions("body") { MaxLength = 200 });
+/// var results = searcher.Search(query, new SearchOptions { Snippets = new SnippetOptions("body") { MaxLength = 200 } });
 /// string html = results[0].Snippets["body"].ToHtml();
 /// </code>
 /// </example>

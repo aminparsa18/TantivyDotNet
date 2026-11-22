@@ -29,14 +29,14 @@ public class FacetTests
         using var index = Library();
         using var searcher = index.CreateSearcher();
 
-        var root = searcher.Search(Query.All, facets: [new FacetRequest("genre")]);
+        var root = searcher.Search(Query.All, new SearchOptions { Facets = [new FacetRequest("genre")] });
         Assert.Equal([("/award", 1L), ("/fiction", 3L), ("/nonfiction", 2L)], Counts(root, "genre"));
 
-        var fiction = searcher.Search(Query.All, facets: [new FacetRequest("genre", "/fiction", "/nonfiction")]);
+        var fiction = searcher.Search(Query.All, new SearchOptions { Facets = [new FacetRequest("genre", "/fiction", "/nonfiction")] });
         Assert.Equal([("/fiction/novel", 2L), ("/fiction/novella", 1L), ("/nonfiction/travel", 2L)], Counts(fiction, "genre"));
 
         // A path together with one of its ancestors (Tantivy's collector forbids that in one collector).
-        var both = searcher.Search(Query.All, facets: [new FacetRequest("genre", "/", "/fiction")]);
+        var both = searcher.Search(Query.All, new SearchOptions { Facets = [new FacetRequest("genre", "/", "/fiction")] });
         Assert.Equal(5, both.Facets["genre"].Count);
     }
 
@@ -46,16 +46,16 @@ public class FacetTests
         using var index = Library();
         using var searcher = index.CreateSearcher();
 
-        var results = searcher.Search(Query.Range("year", 1950, null), limit: 1, facets: [new FacetRequest("genre")]);
+        var results = searcher.Search(Query.Range("year", 1950, null), new SearchOptions { Limit = 1, Facets = [new FacetRequest("genre")] });
         Assert.Single(results);
         Assert.Equal(3, results.TotalCount);
         Assert.Equal([("/fiction", 1L), ("/nonfiction", 2L)], Counts(results, "genre"));   // no matches under /award: left out
 
-        var countOnly = searcher.Search("mice", limit: 0, facets: [new FacetRequest("genre", "/fiction")]);
+        var countOnly = searcher.Search("mice", new SearchOptions { Limit = 0, Facets = [new FacetRequest("genre", "/fiction")] });
         Assert.Empty(countOnly);
         Assert.Equal([("/fiction/novella", 1L)], Counts(countOnly, "genre"));
 
-        var none = searcher.Search("zebra", facets: [new FacetRequest("genre")]);
+        var none = searcher.Search("zebra", new SearchOptions { Facets = [new FacetRequest("genre")] });
         Assert.Empty(none.Facets["genre"]);
     }
 
@@ -65,7 +65,7 @@ public class FacetTests
         using var index = Library();
         using var searcher = index.CreateSearcher();
 
-        var top = searcher.Search(Query.All, facets: [new FacetRequest("genre") { Top = 2 }]);
+        var top = searcher.Search(Query.All, new SearchOptions { Facets = [new FacetRequest("genre") { Top = 2 }] });
         Assert.Equal([("/fiction", 3L), ("/nonfiction", 2L)], Counts(top, "genre"));
         Assert.Throws<ArgumentOutOfRangeException>(() => new FacetRequest("genre") { Top = 0 });
     }
@@ -113,7 +113,7 @@ public class FacetTests
         }
         using var searcher = index.CreateSearcher();
 
-        var r = searcher.Search(Query.Facet("size", "/inch/1\\/2"), facets: [new FacetRequest("size", "/inch")]);
+        var r = searcher.Search(Query.Facet("size", "/inch/1\\/2"), new SearchOptions { Facets = [new FacetRequest("size", "/inch")] });
         Assert.Equal("/inch/1\\/2", Assert.Single(r).Document.GetString("size"));
         Assert.Equal([("/inch/1\\/2", 1L)], Counts(r, "size"));
     }
@@ -125,13 +125,13 @@ public class FacetTests
         using var searcher = index.CreateSearcher();
 
         Assert.Empty(searcher.Search(Query.All).Facets);
-        Assert.Equal(TantivyErrorCode.InvalidArgument, Assert.Throws<TantivyException>(() => searcher.Search(Query.All, facets: [new FacetRequest("title")])).Code);
-        Assert.Equal(TantivyErrorCode.InvalidArgument, Assert.Throws<TantivyException>(() => searcher.Search(Query.All, facets: [new FacetRequest("nope")])).Code);
+        Assert.Equal(TantivyErrorCode.InvalidArgument, Assert.Throws<TantivyException>(() => searcher.Search(Query.All, new SearchOptions { Facets = [new FacetRequest("title")] })).Code);
+        Assert.Equal(TantivyErrorCode.InvalidArgument, Assert.Throws<TantivyException>(() => searcher.Search(Query.All, new SearchOptions { Facets = [new FacetRequest("nope")] })).Code);
         Assert.Equal(TantivyErrorCode.InvalidArgument, Assert.Throws<TantivyException>(
-            () => searcher.Search(Query.All, facets: [new FacetRequest("genre", "/fiction"), new FacetRequest("genre", "/award")])).Code);
+            () => searcher.Search(Query.All, new SearchOptions { Facets = [new FacetRequest("genre", "/fiction"), new FacetRequest("genre", "/award")] })).Code);
 
         Assert.Throws<ArgumentException>(() => new FacetRequest("genre", "fiction"));
         Assert.Throws<ArgumentException>(() => new FacetRequest("genre", [null!]));
-        Assert.Throws<ArgumentException>(() => searcher.Search(Query.All, facets: [null!]));
+        Assert.Throws<ArgumentException>(() => searcher.Search(Query.All, new SearchOptions { Facets = [null!] }));
     }
 }

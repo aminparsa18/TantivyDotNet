@@ -3,13 +3,13 @@ using System.Text.Json;
 namespace TantivyDotNet;
 
 /// <summary>
-/// Asks <see cref="Searcher.Search(Query, int, int, SnippetOptions?, IEnumerable{FacetRequest}?)"/>
+/// Asks <see cref="Searcher.Search(Query, SearchOptions)"/>
 /// to count the matching documents in each child category of some facet paths. The counts appear
 /// in <see cref="SearchResults.Facets"/> under <see cref="Field"/>.
 /// </summary>
 /// <example>
 /// <code>
-/// var results = searcher.Search(query, facets: [new FacetRequest("genre", "/")]);
+/// var results = searcher.Search(query, new SearchOptions { Facets = [new FacetRequest("genre", "/")] });
 /// foreach (var (path, count) in results.Facets["genre"]) Console.WriteLine($"{path}: {count}");
 /// // /fiction: 12
 /// // /history: 3

@@ -20,12 +20,13 @@ mod ffi;
 mod query_spec;
 mod schema_spec;
 mod snippets;
+mod sorting;
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-use tantivy::collector::{Count, MultiCollector, TopDocs};
+use tantivy::collector::{Count, MultiCollector};
 use tantivy::schema::{Field, FieldType, NamedFieldDocument, Schema};
 use tantivy::{
     Document, Index, IndexReader, IndexWriter, ReloadPolicy, Searcher, TantivyDocument, Term,
@@ -34,6 +35,7 @@ use tantivy::{
 use facets::{FacetRequest, FacetResultJson};
 use query_spec::QuerySpec;
 use snippets::{SnippetJson, SnippetRequest, Snippets};
+use sorting::SortRequest;
 use ffi::{guard, handle, str_arg, write_out, FfiError, FfiResult};
 
 /// Bumped whenever the exported C ABI changes; the managed side checks it on load.
@@ -355,7 +357,10 @@ struct SearchResultJson {
 
 #[derive(Serialize)]
 struct HitJson {
+    /// NaN when sorted by a field; serde_json writes non-finite floats as `null`.
     score: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sort: Option<serde_json::Value>,
     doc: NamedFieldDocument,
     #[serde(skip_serializing_if = "Option::is_none")]
     snippets: Option<BTreeMap<String, SnippetJson>>,
@@ -372,6 +377,8 @@ struct SearchRequest {
     snippets: Option<SnippetRequest>,
     #[serde(default)]
     facets: Option<Vec<FacetRequest>>,
+    #[serde(default)]
+    sort: Option<SortRequest>,
 }
 
 fn default_limit() -> usize {
@@ -379,9 +386,9 @@ fn default_limit() -> usize {
 }
 
 /// Runs a search described by request JSON (see `query_spec` for the query part):
-/// `{"query": {...}, "limit": n, "offset": n, "snippets": {...}?, "facets": [...]?}`, and returns
-/// `{"count": <total matches>, "hits": [{"score": f, "doc": {"field": [values...]}, "snippets": {...}?}], "facets": {...}?}`
-/// (see the `snippets` and `facets` modules for those parts).
+/// `{"query": {...}, "limit": n, "offset": n, "sort": {...}?, "snippets": {...}?, "facets": [...]?}`,
+/// and returns `{"count": <total matches>, "hits": [{"score": f|null, "sort": {...}?, "doc": {"field": [values...]},
+/// "snippets": {...}?}], "facets": {...}?}` (see the `sorting`, `snippets` and `facets` modules).
 /// `limit == 0` only counts.
 #[no_mangle]
 pub unsafe extern "C" fn tdn_searcher_search(
@@ -401,9 +408,10 @@ pub unsafe extern "C" fn tdn_searcher_search(
 
         let mut collectors = MultiCollector::new();
         let count_handle = collectors.add_collector(Count);
-        let top_handle = (request.limit > 0).then(|| {
-            collectors.add_collector(TopDocs::with_limit(request.limit).and_offset(request.offset).order_by_score())
-        });
+        let top_handle = match request.limit {
+            0 => None,
+            limit => Some(sorting::add(request.sort.as_ref(), limit, request.offset, &schema, &mut collectors)?),
+        };
         let facet_plans = match &request.facets {
             Some(f) => facets::add(f, &schema, &mut collectors)?,
             None => Vec::new(),
@@ -411,7 +419,7 @@ pub unsafe extern "C" fn tdn_searcher_search(
 
         let mut fruits = s.searcher.search(&query, &collectors)?;
         let count = count_handle.extract(&mut fruits);
-        let top = top_handle.map(|h| h.extract(&mut fruits)).unwrap_or_default();
+        let top = top_handle.map(|h| sorting::extract(h, &mut fruits)).unwrap_or_default();
         let facets = request.facets.is_some().then(|| facets::collect(facet_plans, &mut fruits));
 
         // Built even with no hits, so an invalid snippet field fails consistently.
@@ -422,10 +430,10 @@ pub unsafe extern "C" fn tdn_searcher_search(
             .transpose()?;
         let hits = top
             .into_iter()
-            .map(|(score, address)| {
+            .map(|(score, sort, address)| {
                 let doc: TantivyDocument = s.searcher.doc(address)?;
                 let snippets = snippets.as_ref().map(|g| g.for_doc(&doc));
-                Ok(HitJson { score, doc: doc.to_named_doc(&schema), snippets })
+                Ok(HitJson { score, sort, doc: doc.to_named_doc(&schema), snippets })
             })
             .collect::<FfiResult<Vec<_>>>()?;
 

@@ -26,7 +26,7 @@ public class SnippetTests
         using var index = Articles("George and Lennie dream of a farm with rabbits and mice");
         using var searcher = index.CreateSearcher();
 
-        var hit = Assert.Single(searcher.Search(Query.Term("body", "mice"), snippets: new SnippetOptions("body")));
+        var hit = Assert.Single(searcher.Search(Query.Term("body", "mice"), new SearchOptions { Snippets = new SnippetOptions("body") }));
         var s = hit.Snippets["body"];
         Assert.False(s.IsEmpty);
         Assert.Contains("rabbits and mice", s.Fragment);
@@ -42,11 +42,11 @@ public class SnippetTests
         using var index = Articles("George and Lennie dream of a farm with rabbits and mice");
         using var searcher = index.CreateSearcher();
 
-        var s = Assert.Single(searcher.Search("mice OR George OR rabbits", snippets: new SnippetOptions("body"))).Snippets["body"];
+        var s = Assert.Single(searcher.Search("mice OR George OR rabbits", new SearchOptions { Snippets = new SnippetOptions("body") })).Snippets["body"];
         Assert.Equal(["George", "rabbits", "mice"], Marked(s));               // original case, sorted by position
         Assert.True(s.Highlights.Zip(s.Highlights.Skip(1)).All(p => p.First.End.Value <= p.Second.Start.Value));
 
-        s = Assert.Single(searcher.Search(Query.Phrase("body", "Lennie dream"), snippets: new SnippetOptions("body"))).Snippets["body"];
+        s = Assert.Single(searcher.Search(Query.Phrase("body", "Lennie dream"), new SearchOptions { Snippets = new SnippetOptions("body") })).Snippets["body"];
         Assert.Equal(["Lennie", "dream"], Marked(s));
     }
 
@@ -57,7 +57,7 @@ public class SnippetTests
         using var index = Articles("Café 😀 Преступление и наказание 東京 naïve mice résumé");
         using var searcher = index.CreateSearcher();
 
-        var s = Assert.Single(searcher.Search("mice наказание résumé", snippets: new SnippetOptions("body"))).Snippets["body"];
+        var s = Assert.Single(searcher.Search("mice наказание résumé", new SearchOptions { Snippets = new SnippetOptions("body") })).Snippets["body"];
         Assert.Equal(["наказание", "mice", "résumé"], Marked(s));
         Assert.Contains("😀 Преступление и <b>наказание</b> 東京 naïve <b>mice</b> <b>résumé</b>", s.ToHtml());
     }
@@ -69,11 +69,11 @@ public class SnippetTests
         using var index = Articles($"{filler} the rabbits ran {filler}");
         using var searcher = index.CreateSearcher();
 
-        var s = Assert.Single(searcher.Search(Query.Term("body", "rabbits"), snippets: new SnippetOptions("body") { MaxLength = 40 })).Snippets["body"];
+        var s = Assert.Single(searcher.Search(Query.Term("body", "rabbits"), new SearchOptions { Snippets = new SnippetOptions("body") { MaxLength = 40 } })).Snippets["body"];
         Assert.InRange(s.Fragment.Length, 7, 40);
         Assert.Equal(["rabbits"], Marked(s));
 
-        var longer = Assert.Single(searcher.Search(Query.Term("body", "rabbits"), snippets: new SnippetOptions("body"))).Snippets["body"];
+        var longer = Assert.Single(searcher.Search(Query.Term("body", "rabbits"), new SearchOptions { Snippets = new SnippetOptions("body") })).Snippets["body"];
         Assert.True(longer.Fragment.Length > 40);
         Assert.InRange(longer.Fragment.Length, 41, 150);
     }
@@ -84,7 +84,7 @@ public class SnippetTests
         using var index = Articles("mice everywhere", "no rodents here");
         using var searcher = index.CreateSearcher();
 
-        var results = searcher.Search(Query.Term("body", "mice") | Query.Term("title", "1"), snippets: new SnippetOptions("title", "body"));
+        var results = searcher.Search(Query.Term("body", "mice") | Query.Term("title", "1"), new SearchOptions { Snippets = new SnippetOptions("title", "body") });
         var byId = results.ToDictionary(h => h.Document.GetString("id")!);
 
         Assert.Equal(["mice"], Marked(byId["a0"].Snippets["body"]));
@@ -109,7 +109,7 @@ public class SnippetTests
         using var index = Articles("Tom & Jerry <script>alert('x')</script> \"mice\"");
         using var searcher = index.CreateSearcher();
 
-        var s = Assert.Single(searcher.Search("mice", snippets: new SnippetOptions("body"))).Snippets["body"];
+        var s = Assert.Single(searcher.Search("mice", new SearchOptions { Snippets = new SnippetOptions("body") })).Snippets["body"];
         Assert.Equal("Tom &amp; Jerry &lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt; &quot;<em>mice</em>", s.ToHtml("<em>", "</em>"));
     }
 
@@ -120,8 +120,8 @@ public class SnippetTests
         using var index = Articles("mice everywhere");
         using var searcher = index.CreateSearcher();
 
-        Assert.True(Assert.Single(searcher.Search(Query.Fuzzy("body", "mise"), snippets: new SnippetOptions("body"))).Snippets["body"].IsEmpty);
-        Assert.True(Assert.Single(searcher.Search(Query.Range("n", 0, 5), snippets: new SnippetOptions("body"))).Snippets["body"].IsEmpty);
+        Assert.True(Assert.Single(searcher.Search(Query.Fuzzy("body", "mise"), new SearchOptions { Snippets = new SnippetOptions("body") })).Snippets["body"].IsEmpty);
+        Assert.True(Assert.Single(searcher.Search(Query.Range("n", 0, 5), new SearchOptions { Snippets = new SnippetOptions("body") })).Snippets["body"].IsEmpty);
     }
 
     [Fact]
@@ -130,11 +130,11 @@ public class SnippetTests
         using var books = Books.InRam();                // body is indexed but not stored
         using var searcher = books.CreateSearcher();
 
-        Assert.Equal(TantivyErrorCode.InvalidArgument, Assert.Throws<TantivyException>(() => searcher.Search("mice", snippets: new SnippetOptions("body"))).Code);
-        Assert.Equal(TantivyErrorCode.InvalidArgument, Assert.Throws<TantivyException>(() => searcher.Search("mice", snippets: new SnippetOptions("year"))).Code);
-        Assert.Equal(TantivyErrorCode.InvalidArgument, Assert.Throws<TantivyException>(() => searcher.Search("mice", snippets: new SnippetOptions("nope"))).Code);
+        Assert.Equal(TantivyErrorCode.InvalidArgument, Assert.Throws<TantivyException>(() => searcher.Search("mice", new SearchOptions { Snippets = new SnippetOptions("body") })).Code);
+        Assert.Equal(TantivyErrorCode.InvalidArgument, Assert.Throws<TantivyException>(() => searcher.Search("mice", new SearchOptions { Snippets = new SnippetOptions("year") })).Code);
+        Assert.Equal(TantivyErrorCode.InvalidArgument, Assert.Throws<TantivyException>(() => searcher.Search("mice", new SearchOptions { Snippets = new SnippetOptions("nope") })).Code);
         // Validated even when nothing matches.
-        Assert.Throws<TantivyException>(() => searcher.Search("zebra", snippets: new SnippetOptions("nope")));
+        Assert.Throws<TantivyException>(() => searcher.Search("zebra", new SearchOptions { Snippets = new SnippetOptions("nope") }));
 
         Assert.Throws<ArgumentException>(() => new SnippetOptions());
         Assert.Throws<ArgumentException>(() => new SnippetOptions("title", null!));

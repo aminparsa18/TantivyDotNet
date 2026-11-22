@@ -45,23 +45,31 @@ var query = Query.Phrase("body", "of mice", slop: 1)            // analyzed with
 var results = searcher.Search(query);
 ```
 
-Snippets highlight matches in stored text fields:
+Beyond a limit and offset, a search takes `SearchOptions` for ordering, snippets and facet counts:
 
 ```csharp
-var results = searcher.Search("rabbits", snippets: new SnippetOptions("body") { MaxLength = 200 });
-Snippet s = results[0].Snippets["body"];
-s.ToHtml();                                            // "...a farm with <b>rabbits</b> and mice", HTML-encoded
-foreach (Range r in s.Highlights) Console.WriteLine(s.Fragment[r]);
+var results = searcher.Search(query, new SearchOptions
+{
+    Limit = 20,
+    Offset = 40,
+    OrderBy = SortBy.Field("year", descending: true),       // a fast field; null = by relevance
+    Snippets = new SnippetOptions("body") { MaxLength = 200 },
+    Facets = [new FacetRequest("genre", "/fiction") { Top = 5 }],
+});
 ```
 
-Facets are hierarchical categories (`.AddFacetField("genre")`, documents hold paths like `"/fiction/novel"`) that you can filter on and count:
-
-```csharp
-var results = searcher.Search(Query.Parse("war") & Query.Facet("genre", "/fiction"),
-                              facets: [new FacetRequest("genre", "/fiction") { Top = 5 }]);
-foreach (var (path, count) in results.Facets["genre"])  // counts over all matches, not just this page
-    Console.WriteLine($"{path}: {count}");              // /fiction/novel: 12 ...
-```
+- **Sorting** works on one fast field (`fast: true`) of any type except facets. Documents without a value come last, and `hit.SortValue` holds the value sorted by. Relevance isn't computed, so `hit.Score` is `NaN`.
+- **Snippets** highlight matches in stored text fields:
+  ```csharp
+  Snippet s = results[0].Snippets["body"];
+  s.ToHtml();                                            // "...a farm with <b>rabbits</b> and mice", HTML-encoded
+  foreach (Range r in s.Highlights) Console.WriteLine(s.Fragment[r]);
+  ```
+- **Facets** are hierarchical categories (`.AddFacetField("genre")`, documents hold paths like `"/fiction/novel"`). Filter with `Query.Facet("genre", "/fiction")` and count with `FacetRequest`:
+  ```csharp
+  foreach (var (path, count) in results.Facets["genre"])  // counts over all matches, not just this page
+      Console.WriteLine($"{path}: {count}");              // /fiction/novel: 12 ...
+  ```
 
 Some behavior to know about:
 

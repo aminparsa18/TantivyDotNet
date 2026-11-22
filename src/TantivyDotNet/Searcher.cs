@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Collections;
 using System.Text.Json;
 using TantivyDotNet.Interop;
@@ -49,35 +48,47 @@ public sealed unsafe class Searcher : IDisposable
     /// <param name="limit">Maximum number of hits to return. 0 returns no hits but still computes <see cref="SearchResults.TotalCount"/>.</param>
     /// <param name="offset">Number of top hits to skip, for paging.</param>
     /// <param name="defaultFields">Fields searched by unprefixed terms. Null means every indexed text field.</param>
-    /// <param name="snippets">Fields to compute <see cref="SearchHit.Snippets"/> for, or null for none.</param>
-    /// <param name="facets">Facet categories to count over all matching documents (not just the returned page), or null for none. See <see cref="SearchResults.Facets"/>.</param>
     /// <exception cref="QueryParseException">The query is malformed or references an unknown field.</exception>
-    public SearchResults Search(string query, int limit = 10, int offset = 0, IEnumerable<string>? defaultFields = null,
-        SnippetOptions? snippets = null, IEnumerable<FacetRequest>? facets = null) =>
-        Search(Query.Parse(query, defaultFields), limit, offset, snippets, facets);
+    public SearchResults Search(string query, int limit = 10, int offset = 0, IEnumerable<string>? defaultFields = null) =>
+        Search(Query.Parse(query, defaultFields), limit, offset);
+
+    /// <summary>
+    /// Parses <paramref name="query"/> with Tantivy's query language (unprefixed terms search every
+    /// indexed text field) and runs it with <paramref name="options"/>. To choose the default fields,
+    /// use <see cref="Search(Query, SearchOptions)"/> with <see cref="Query.Parse"/>.
+    /// </summary>
+    /// <param name="query">The query text; see <see cref="Search(string, int, int, IEnumerable{string}?)"/>.</param>
+    /// <param name="options">Paging, ordering, snippets and facets.</param>
+    /// <exception cref="QueryParseException">The query is malformed or references an unknown field.</exception>
+    /// <exception cref="TantivyException">An option doesn't fit the schema; see <see cref="Search(Query, SearchOptions)"/>.</exception>
+    public SearchResults Search(string query, SearchOptions options) => Search(Query.Parse(query), options);
 
     /// <summary>Runs a query built in code and returns the best-scoring documents.</summary>
     /// <param name="query">The query; see <see cref="Query"/>.</param>
     /// <param name="limit">Maximum number of hits to return. 0 returns no hits but still computes <see cref="SearchResults.TotalCount"/>.</param>
     /// <param name="offset">Number of top hits to skip, for paging.</param>
-    /// <param name="snippets">Fields to compute <see cref="SearchHit.Snippets"/> for, or null for none.</param>
-    /// <param name="facets">Facet categories to count over all matching documents (not just the returned page), or null for none. See <see cref="SearchResults.Facets"/>.</param>
     /// <exception cref="TantivyException">
     /// A field doesn't exist or doesn't fit the query (for example a phrase on a numeric field),
-    /// a snippet field isn't a stored text field, a facet request names a non-facet field or the
-    /// same field twice, or a <see cref="ParsedQuery"/> inside the query
-    /// is malformed (<see cref="QueryParseException"/>).
+    /// or a <see cref="ParsedQuery"/> inside the query is malformed (<see cref="QueryParseException"/>).
     /// </exception>
-    public SearchResults Search(Query query, int limit = 10, int offset = 0, SnippetOptions? snippets = null, IEnumerable<FacetRequest>? facets = null)
+    public SearchResults Search(Query query, int limit = 10, int offset = 0) =>
+        Search(query, limit == 10 && offset == 0 ? SearchOptions.Default : new SearchOptions { Limit = limit, Offset = offset });
+
+    /// <summary>Runs a query built in code with paging, ordering, snippets and facets.</summary>
+    /// <param name="query">The query; see <see cref="Query"/>.</param>
+    /// <param name="options">Paging, ordering, snippets and facets.</param>
+    /// <exception cref="TantivyException">
+    /// A field doesn't exist or doesn't fit the query (for example a phrase on a numeric field);
+    /// the sort field isn't a fast field of a sortable type; a snippet field isn't a stored text
+    /// field; a facet request names a non-facet field or the same field twice; or a
+    /// <see cref="ParsedQuery"/> inside the query is malformed (<see cref="QueryParseException"/>).
+    /// </exception>
+    public SearchResults Search(Query query, SearchOptions options)
     {
         ArgumentNullException.ThrowIfNull(query);
-        ArgumentOutOfRangeException.ThrowIfNegative(limit);
-        ArgumentOutOfRangeException.ThrowIfNegative(offset);
+        ArgumentNullException.ThrowIfNull(options);
 
-        FacetRequest[]? facetArray = facets?.ToArray();
-        if (facetArray is not null && Array.IndexOf(facetArray, null) >= 0)
-            throw new ArgumentException("Facet requests can't be null.", nameof(facets));
-        byte[] request = SearchRequest(query, limit, offset, snippets, facetArray);
+        byte[] request = options.ToRequestJson(query);
         byte[] resultJson;
         using (var lease = _handle.Lease())
         {
@@ -93,46 +104,19 @@ public sealed unsafe class Searcher : IDisposable
     }
 
     /// <summary>Counts the documents matching <paramref name="query"/> without retrieving them.</summary>
-    /// <inheritdoc cref="Search(string, int, int, IEnumerable{string}?, SnippetOptions?, IEnumerable{FacetRequest}?)" path="/param[@name='query']|/param[@name='defaultFields']|/exception"/>
+    /// <inheritdoc cref="Search(string, int, int, IEnumerable{string}?)" path="/param[@name='query']|/param[@name='defaultFields']|/exception"/>
     public long Count(string query, IEnumerable<string>? defaultFields = null) =>
         Search(query, limit: 0, defaultFields: defaultFields).TotalCount;
 
     /// <summary>Counts the documents matching <paramref name="query"/> without retrieving them.</summary>
-    /// <inheritdoc cref="Search(Query, int, int, SnippetOptions?, IEnumerable{FacetRequest}?)" path="/param[@name='query']|/exception"/>
+    /// <inheritdoc cref="Search(Query, int, int)" path="/param[@name='query']|/exception"/>
     public long Count(Query query) => Search(query, limit: 0).TotalCount;
 
     /// <summary>Releases the snapshot. Safe to call more than once.</summary>
     public void Dispose() => _handle.Dispose();
-
-    // Shape: {"query": {...}, "limit": n, "offset": n, "snippets"?: {...}, "facets"?: [...]} (see tdn_searcher_search in native/src/lib.rs).
-    private static byte[] SearchRequest(Query query, int limit, int offset, SnippetOptions? snippets, FacetRequest[]? facets)
-    {
-        var buffer = new ArrayBufferWriter<byte>();
-        using (var w = new Utf8JsonWriter(buffer))
-        {
-            w.WriteStartObject();
-            w.WritePropertyName("query");
-            query.WriteJson(w);
-            w.WriteNumber("limit", limit);
-            w.WriteNumber("offset", offset);
-            if (snippets is not null)
-            {
-                w.WritePropertyName("snippets");
-                snippets.WriteJson(w);
-            }
-            if (facets is not null)
-            {
-                w.WriteStartArray("facets");
-                foreach (var f in facets) f.WriteJson(w);
-                w.WriteEndArray();
-            }
-            w.WriteEndObject();
-        }
-        return buffer.WrittenSpan.ToArray();
-    }
 }
 
-/// <summary>The hits returned by <see cref="Searcher.Search(Query, int, int, SnippetOptions?, IEnumerable{FacetRequest}?)"/>, best first.</summary>
+/// <summary>The hits returned by <see cref="Searcher.Search(Query, SearchOptions)"/>, best first.</summary>
 public sealed class SearchResults : IReadOnlyList<SearchHit>
 {
     private readonly SearchHit[] _hits;
@@ -147,7 +131,7 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
     }
 
     /// <summary>
-    /// Facet counts keyed by facet field, for the <see cref="FacetRequest"/>s passed to the search:
+    /// Facet counts keyed by facet field, for the <see cref="SearchOptions.Facets"/> requested:
     /// the children of each requested path, with the number of matching documents in each. Children
     /// with no matches are left out. Empty if no facets were requested.
     /// </summary>
@@ -176,10 +160,14 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
         var hits = new SearchHit[hitsJson.GetArrayLength()];
         int i = 0;
         foreach (var h in hitsJson.EnumerateArray())
-            hits[i++] = new SearchHit(h.GetProperty("score").GetSingle(), new Document(h.GetProperty("doc").Clone()))
+        {
+            var score = h.GetProperty("score");
+            hits[i++] = new SearchHit(score.ValueKind == JsonValueKind.Null ? float.NaN : score.GetSingle(), new Document(h.GetProperty("doc").Clone()))
             {
                 Snippets = h.TryGetProperty("snippets", out var sn) ? ParseSnippets(sn) : SearchHit.NoSnippets,
+                SortValue = h.TryGetProperty("sort", out var sv) ? ParseSortValue(sv) : null,
             };
+        }
         var facets = root.TryGetProperty("facets", out var fj) ? ParseFacets(fj) : NoFacets;
         return new SearchResults(hits, root.GetProperty("count").GetInt64(), facets);
     }
@@ -199,6 +187,24 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
         return map;
     }
 
+    // Tagged like query values: {"u64": 5}, {"date": micros}, ... or null (see native/src/sorting.rs).
+    private static object? ParseSortValue(JsonElement json)
+    {
+        if (json.ValueKind == JsonValueKind.Null) return null;
+        var p = json.EnumerateObject().Single();
+        return p.Name switch
+        {
+            "str" => p.Value.GetString(),
+            "u64" => p.Value.GetUInt64(),
+            "i64" => p.Value.GetInt64(),
+            "f64" => p.Value.GetDouble(),
+            "bool" => p.Value.GetBoolean(),
+            "date" => DateTimeOffset.UnixEpoch.AddTicks(p.Value.GetInt64() * TimeSpan.TicksPerMicrosecond),
+            "bytes" => p.Value.EnumerateArray().Select(b => b.GetByte()).ToArray(),
+            _ => throw new InvalidOperationException($"Unexpected sort value kind '{p.Name}'."),
+        };
+    }
+
     private static Dictionary<string, Snippet> ParseSnippets(JsonElement json)
     {
         var map = new Dictionary<string, Snippet>();
@@ -208,14 +214,22 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
 }
 
 /// <summary>One search hit.</summary>
-/// <param name="Score">Relevance score (BM25); higher is better.</param>
+/// <param name="Score">Relevance score (BM25); higher is better. <see cref="float.NaN"/> when sorted by a field (<see cref="SortBy"/>), since scoring is skipped.</param>
 /// <param name="Document">The hit's stored fields.</param>
 public sealed record SearchHit(float Score, Document Document)
 {
     internal static readonly IReadOnlyDictionary<string, Snippet> NoSnippets = new Dictionary<string, Snippet>();
 
     /// <summary>
-    /// Snippets keyed by field name, for the fields requested with <see cref="SnippetOptions"/>;
+    /// When sorted with <see cref="SortBy.Field"/>, the hit's value of the sort field (a
+    /// <see cref="string"/>, <see cref="ulong"/>, <see cref="long"/>, <see cref="double"/>,
+    /// <see cref="bool"/>, <see cref="DateTimeOffset"/> or <see cref="T:byte[]"/>), or null if the
+    /// document has none. Null when sorted by relevance.
+    /// </summary>
+    public object? SortValue { get; init; }
+
+    /// <summary>
+    /// Snippets keyed by field name, for the fields requested in <see cref="SearchOptions.Snippets"/>;
     /// empty if none were requested.
     /// </summary>
     public IReadOnlyDictionary<string, Snippet> Snippets { get; init; } = NoSnippets;
