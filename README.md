@@ -2,9 +2,13 @@
 
 An idiomatic .NET binding for [Tantivy](https://github.com/quickwit-oss/tantivy), the fast full-text search engine library written in Rust (think Lucene). The goal is a NuGet package that gives you embedded full-text search in .NET without needing to know that Rust is involved.
 
+![Benchmark results: TantivyDotNet indexes 2-3× faster than Lucene.NET and answers term, AND, OR and sorted queries 4-7× faster; phrase queries are 4% slower, and the index is 4% larger.](https://raw.githubusercontent.com/aminparsa18/TantivyDotNet/main/benchmarks/results/summary.svg)
+
+What was measured, and how, is under [Performance](#performance).
+
 ## Status
 
-**Early development.** Schemas (including JSON and IP address fields), custom analyzers, in-memory and on-disk indexes, adding, updating and deleting documents, commit and rollback, query strings and queries built in code, snippets, facets, multi-key sorting with cursor paging, aggregations, score explanations, merge control, index settings, index statistics and shared searchers all work. CI builds a NuGet package for every supported platform and tests it, including from a NativeAOT app. Preview releases are [on nuget.org](https://www.nuget.org/packages/TantivyDotNet); the API may still change before 1.0.
+The project is in early development. Schemas (including JSON and IP address fields), custom analyzers, in-memory and on-disk indexes, adding, updating and deleting documents, commit and rollback, query strings and queries built in code, snippets, facets, multi-key sorting with cursor paging, aggregations, score explanations, merge control, index settings, index statistics and shared searchers all work. CI builds a NuGet package for every supported platform and tests it, including from a NativeAOT app. Preview releases are [on nuget.org](https://www.nuget.org/packages/TantivyDotNet); the API may still change before 1.0.
 
 ## Installation
 
@@ -92,29 +96,31 @@ var results = searcher.Search(query, new SearchOptions
 });
 ```
 
-- **Sorting** takes one or more keys: fast fields (`fast: true`) of any type except facets and JSON, and `SortBy.Score()`. Documents without a value come last, and `hit.SortValues` holds the values sorted by. Unless the score is a key, relevance isn't computed, so `hit.Score` is `NaN`.
-- **Deep paging.** `Offset` gets slower as it grows. Instead, pass the last hit's `Cursor` as `SearchAfter` (with the same `OrderBy`) to get the next page:
+- Sorting takes one or more keys: fast fields (`fast: true`) of any type except facets and JSON, and `SortBy.Score()`. Documents without a value come last, and `hit.SortValues` holds the values sorted by. Unless the score is a key, relevance isn't computed, so `hit.Score` is `NaN`.
+- For deep paging, don't use `Offset`, which gets slower as it grows. Pass the last hit's `Cursor` as `SearchAfter` (with the same `OrderBy`) to get the next page:
   ```csharp
   var next = searcher.Search(query, new SearchOptions { Limit = 20, OrderBy = order, SearchAfter = results[^1].Cursor });
   ```
-- **Snippets** highlight matches in stored text fields:
+- Snippets highlight matches in stored text fields:
   ```csharp
   Snippet s = results[0].Snippets["body"];
   s.ToHtml();                                            // "...a farm with <b>rabbits</b> and mice", HTML-encoded
   foreach (Range r in s.Highlights) Console.WriteLine(s.Fragment[r]);
   ```
-- **Facets** are hierarchical categories (`.AddFacetField("genre")`, documents hold paths like `"/fiction/novel"`). Filter with `Query.Facet("genre", "/fiction")` and count with `FacetRequest`:
+- Facets are hierarchical categories (`.AddFacetField("genre")`, documents hold paths like `"/fiction/novel"`). Filter with `Query.Facet("genre", "/fiction")` and count with `FacetRequest`:
   ```csharp
   foreach (var (path, count) in results.Facets["genre"])  // counts over all matches, not just this page
       Console.WriteLine($"{path}: {count}");              // /fiction/novel: 12 ...
   ```
-- **Aggregations** use Tantivy's Elasticsearch-compatible JSON (`terms`, `range`, `histogram`, `date_histogram`, `avg`, `stats`, `percentiles`, `cardinality`, `top_hits` and more, with nested `aggs`) over fast fields. They run in the same pass as the hits. Read the result as JSON or as your own types:
+- Aggregations use Tantivy's Elasticsearch-compatible JSON (`terms`, `range`, `histogram`, `date_histogram`, `avg`, `stats`, `percentiles`, `cardinality`, `top_hits` and more, with nested `aggs`) over fast fields. They run in the same pass as the hits. Read the result as JSON or as your own types:
   ```csharp
   JsonElement aggs = results.Aggregations!.Value;          // {"by_decade": {"buckets": [{"key": 1930.0, "doc_count": 2}, ...]}}
   var typed = results.GetAggregations(MyJsonContext.Default.MyAggs);   // AOT-safe; GetAggregations<T>() uses reflection
   ```
 
-**Analyzers.** Text fields use a built-in tokenizer (`default`, `raw`, `en_stem`, `whitespace`) or a custom analyzer defined in the schema. An index created in a directory saves its analyzers, and `SearchIndex.Open` restores them. `index.Analyze("en_text", "Running cafés")` shows the terms produced.
+### Analyzers
+
+Text fields use a built-in tokenizer (`default`, `raw`, `en_stem`, `whitespace`) or a custom analyzer defined in the schema. An index created in a directory saves its analyzers, and `SearchIndex.Open` restores them. `index.Analyze("en_text", "Running cafés")` shows the terms produced.
 
 ```csharp
 var schema = new SchemaBuilder()
@@ -127,7 +133,9 @@ var schema = new SchemaBuilder()
     .Build();
 ```
 
-**Index lifecycle.** Settings fixed at creation are saved with the index; merge behavior is chosen per writer:
+### Index lifecycle
+
+Settings fixed at creation are saved with the index. Merge behavior is chosen per writer:
 
 ```csharp
 using var index = SearchIndex.Create("books-index", schema, new IndexSettings
@@ -148,7 +156,9 @@ foreach (var f in stats.Fields) Console.WriteLine($"{f.Name}: {f.TotalBytes} byt
 
 `IndexSettings.SortBy` (store documents ordered by a fast field) is experimental, because Tantivy has removed this feature once before; using it raises warning `TDN0001`.
 
-**Sharing a searcher.** In a server, a `SearcherManager` keeps one searcher for all requests and replaces it when the index changes. A lease keeps its searcher valid until disposed, even after it's replaced:
+### Sharing a searcher
+
+In a server, a `SearcherManager` keeps one searcher for all requests and replaces it when the index changes. A lease keeps its searcher valid until disposed, even after it's replaced:
 
 ```csharp
 using var manager = index.CreateSearcherManager(new SearcherManagerOptions
@@ -163,28 +173,26 @@ manager.Refresh();                                    // or reload explicitly, e
 
 With `RefreshOnCommit`, a commit shows up shortly after `Commit()` returns (Tantivy reloads in the background), not immediately.
 
-Some behavior to know about:
+### Behavior to know about
 
-- **Crashes.** A commit is atomic: if the process dies (even during `Commit()`), reopening the index gives the last completed commit, and uncommitted documents are lost. The writer lock is an OS file lock, so it's released when the process dies and the next process can open a writer right away. Files of an interrupted commit or merge are deleted by a later commit or `GarbageCollectFiles()`. The tests check this by killing a child process in the middle of commits.
-- **Undisposed writers.** `IndexWriter.Dispose()` waits for background merges. A writer that's never disposed is cleaned up by its finalizer, which doesn't wait: it abandons running merges and releases the lock.
-- **Thread safety.** `SearchIndex` and `Searcher` are thread-safe, so share one searcher across threads. `IndexWriter` is not thread-safe; use it from one thread at a time (it already indexes on several threads internally). Only one writer can be open per index at a time.
-- **Searchers are snapshots.** A searcher doesn't see commits made after it was created. Create a new one to see them (creating one is cheap), or use a `SearcherManager`. An old snapshot keeps searching after a merge replaced its segments, but `GetStats()` on it can then fail, because sizes are read by reopening the deleted files.
-- **Trimming and NativeAOT.** `AddDocument(object)` uses reflection-based System.Text.Json and is annotated with `[RequiresUnreferencedCode]`. In trimmed or AOT apps, use `AddDocument(doc, MyJsonContext.Default.MyType)` or pass JSON strings instead.
-- **Errors.** Native errors throw `TantivyException`, whose `Code` property tells you the category. Query syntax errors throw `QueryParseException`. Using an object after it has been disposed throws `ObjectDisposedException`.
-- **Documents.** Field values are matched to schema fields by name, case-sensitively. A property that isn't a schema field throws `TantivyException` (so `new { Title = ... }` doesn't silently miss a `title` field); create the writer with `new IndexWriterOptions { IgnoreUnknownFields = true }` to drop such properties instead. Dates must be RFC 3339 strings with an offset, so use `DateTimeOffset` or UTC `DateTime`.
+- A commit is atomic: if the process dies (even during `Commit()`), reopening the index gives the last completed commit, and uncommitted documents are lost. The writer lock is an OS file lock, so it's released when the process dies and the next process can open a writer right away. Files of an interrupted commit or merge are deleted by a later commit or `GarbageCollectFiles()`. The tests check this by killing a child process in the middle of commits.
+- `IndexWriter.Dispose()` waits for background merges. A writer that's never disposed is cleaned up by its finalizer, which doesn't wait: it abandons running merges and releases the lock.
+- `SearchIndex` and `Searcher` are thread-safe, so share one searcher across threads. `IndexWriter` is not thread-safe; use it from one thread at a time (it already indexes on several threads internally). Only one writer can be open per index at a time.
+- A searcher is a snapshot: it doesn't see commits made after it was created. Create a new one to see them (creating one is cheap), or use a `SearcherManager`. An old snapshot keeps searching after a merge replaced its segments, but `GetStats()` on it can then fail, because sizes are read by reopening the deleted files.
+- `AddDocument(object)` uses reflection-based System.Text.Json and is annotated with `[RequiresUnreferencedCode]`. In trimmed or AOT apps, use `AddDocument(doc, MyJsonContext.Default.MyType)` or pass JSON strings instead.
+- Native errors throw `TantivyException`, whose `Code` property tells you the category. Query syntax errors throw `QueryParseException`. Using an object after it has been disposed throws `ObjectDisposedException`.
+- Field values in documents are matched to schema fields by name, case-sensitively. A property that isn't a schema field throws `TantivyException` (so `new { Title = ... }` doesn't silently miss a `title` field); create the writer with `new IndexWriterOptions { IgnoreUnknownFields = true }` to drop such properties instead. Dates must be RFC 3339 strings with an offset, so use `DateTimeOffset` or UTC `DateTime`.
 
 ## Performance
 
-Compared with [Lucene.NET](https://lucenenet.apache.org/) 4.8.0-beta00018 on 215,778 English Wikipedia articles: title plus lead section, 171 MiB of text. Both engines index the same fields (id, title and body stored, plus a numeric column for sorting) and give each writer the same 256 MB indexing buffer. Neither uses stemming or stop words.
-
-![Benchmark results: TantivyDotNet indexes 2-3× faster than Lucene.NET and answers term, AND, OR and sorted queries 4-7× faster; phrase queries are 4% slower, and the index is 4% larger.](https://raw.githubusercontent.com/aminparsa18/TantivyDotNet/main/benchmarks/results/summary.svg)
+Compared with [Lucene.NET](https://lucenenet.apache.org/) 4.8.0-beta00018 on 215,778 English Wikipedia articles: title plus lead section, 171 MiB of text. Both engines index the same fields (id, title and body stored, plus a numeric column for sorting) and give each writer the same 256 MB indexing buffer. Neither uses stemming or stop words. The results are in the chart at the top of this page.
 
 Measured with BenchmarkDotNet 0.15.8 on .NET 10, macOS 26, Intel Core i5-1038NG7 (4 cores / 8 threads), from an SSD. The exact figures are in [benchmarks/results/results.json](benchmarks/results/results.json). Some notes on what this measures:
 
-- **Indexing** starts from articles already in memory as .NET objects, so building each engine's documents is included: serializing to JSON for TantivyDotNet, filling reused `Field` objects for Lucene. With N threads, Tantivy gets N indexing threads fed from one caller thread, while Lucene gets N threads calling `AddDocument`. Closing the writer waits for background merges in both engines.
-- **Queries** run single-threaded against an open searcher, using queries built in code. TantivyDotNet's figure includes the cost of crossing the native boundary (the request and results travel as JSON). Allocation figures (17 KB vs 62 KB per term query, for example) count managed memory only; Tantivy's native allocations aren't included.
-- **Match counts** differ slightly because the tokenizers differ. Lucene keeps `science's` and `States.The` as single tokens; Tantivy's default tokenizer splits them at the punctuation. Tantivy's matches are a superset of Lucene's in every query: 1 extra for each term query, 22 extra for the phrase.
-- Phrase queries are the one case where Lucene is a little faster here. That's in Tantivy's phrase matching: run directly from Rust, Tantivy takes about as long for this query, and the binding adds almost nothing on top (see [where the time goes](benchmarks/README.md#where-the-time-goes-native-harnesses)).
+- Indexing starts from articles already in memory as .NET objects, so building each engine's documents is included: serializing to JSON for TantivyDotNet, filling reused `Field` objects for Lucene. With N threads, Tantivy gets N indexing threads fed from one caller thread, while Lucene gets N threads calling `AddDocument`. Closing the writer waits for background merges in both engines.
+- Queries run single-threaded against an open searcher, using queries built in code. TantivyDotNet's figure includes the cost of crossing the native boundary (the request and results travel as JSON). Allocation figures (17 KB vs 62 KB per term query, for example) count managed memory only; Tantivy's native allocations aren't included.
+- Match counts differ slightly because the tokenizers differ. Lucene keeps `science's` and `States.The` as single tokens; Tantivy's default tokenizer splits them at the punctuation. Tantivy's matches are a superset of Lucene's in every query: 1 extra for each term query, 22 extra for the phrase.
+- Lucene is a little faster only on phrase queries. The time is spent in Tantivy's phrase matching: called directly from Rust, Tantivy takes about as long for this query, and the binding adds almost nothing (see [where the time goes](benchmarks/README.md#where-the-time-goes-native-harnesses)).
 
 To run it yourself, see [benchmarks/README.md](benchmarks/README.md).
 
@@ -207,7 +215,7 @@ samples/WikiSearch/         sample web app
 
 - Each Rust object is an opaque handle wrapped in a `SafeHandle`. No raw pointers are exposed publicly.
 - Every export catches panics. Errors come back as status codes and turn into `TantivyException`.
-- Complex shapes cross the boundary as JSON: documents, schemas, and a single search request (query tree, paging, sort, snippets, facets, aggregations) that runs in one collector pass.
+- Complex shapes cross the boundary as JSON: documents, schemas, and a search request (query tree, paging, sort, snippets, facets, aggregations) that is answered in one native call.
 - Every P/Invoke takes only blittable types, and the assembly sets `[DisableRuntimeMarshalling]`, so the calls need no marshalling stubs under NativeAOT.
 
 ## Building
