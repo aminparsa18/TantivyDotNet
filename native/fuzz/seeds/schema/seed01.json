@@ -1,0 +1,1 @@
+{"fields": [{"name": "t", "type": "text", "tokenizer": "mine"}], "analyzers": {"mine": {"tokenizer": {"type": "ngram", "min_gram": 1, "max_gram": 3, "prefix_only": true}, "filters": [{"type": "lowercase"}, {"type": "ascii_folding"}, {"type": "stop_words", "words": ["a", "the"]}, {"type": "stemmer", "language": "german"}, {"type": "remove_long", "limit": 10}]}}}

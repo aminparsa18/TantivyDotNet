@@ -28,8 +28,12 @@ mod settings;
 mod snippets;
 mod sorting;
 mod stats;
-#[cfg(test)]
+#[cfg(any(test, feature = "fuzzing"))]
 mod testing;
+
+#[cfg(feature = "fuzzing")]
+#[doc(hidden)]
+pub mod fuzzing;
 
 use std::sync::Mutex;
 

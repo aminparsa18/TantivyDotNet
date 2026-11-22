@@ -17,6 +17,7 @@ use std::collections::BTreeMap;
 use std::ops::Bound;
 
 use serde::Deserialize;
+use tantivy::columnar::NumericalValue;
 use tantivy::query::{
     AllQuery, BooleanQuery, BoostQuery, ConstScoreQuery, DisjunctionMaxQuery, EmptyQuery, ExistsQuery, FuzzyTermQuery,
     MoreLikeThisQuery, Occur, PhraseQuery, Query, QueryParser, RangeQuery, RegexQuery, TermQuery, TermSetQuery,
@@ -129,7 +130,7 @@ pub struct FuzzySpec {
     prefix: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ValueSpec {
     Str(String),
@@ -239,28 +240,31 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
             if lower.is_none() && upper.is_none() {
                 return Err(FfiError::invalid("a range query needs at least one bound"));
             }
-            let bound = |b: &Option<BoundSpec>| -> FfiResult<Bound<Term>> {
-                Ok(match b {
-                    None => Bound::Unbounded,
-                    Some(b) => {
-                        let term = match ft {
-                            FieldType::JsonObject(o) => Target::Json {
-                                field: f,
-                                path: path.to_owned(),
-                                expand_dots: o.is_expand_dots_enabled(),
-                            }
-                            .term(field, &b.value)?,
-                            _ => make_term(f, field, ft, &b.value)?,
-                        };
-                        if b.inclusive {
-                            Bound::Included(term)
-                        } else {
-                            Bound::Excluded(term)
-                        }
+            let (lower_value, upper_value) = (lower.as_ref().map(|b| &b.value), upper.as_ref().map(|b| &b.value));
+            let terms = match ft {
+                FieldType::JsonObject(o) => {
+                    if path.is_empty() {
+                        return Err(FfiError::invalid(format!(
+                            "'{field}' is a JSON field: query a path inside it, like '{field}.key'"
+                        )));
                     }
-                })
+                    let target =
+                        Target::Json { field: f, path: path.to_owned(), expand_dots: o.is_expand_dots_enabled() };
+                    let (lower_value, upper_value, as_f64) = unify_json_bounds(field, lower_value, upper_value)?;
+                    let term = |v: Option<ValueSpec>| v.map(|v| target.json_term(field, &v, !as_f64)).transpose();
+                    (term(lower_value)?, term(upper_value)?)
+                }
+                _ => {
+                    let term = |v: Option<&ValueSpec>| v.map(|v| make_term(f, field, ft, v)).transpose();
+                    (term(lower_value)?, term(upper_value)?)
+                }
             };
-            Box::new(RangeQuery::new(bound(lower)?, bound(upper)?))
+            let bound = |b: &Option<BoundSpec>, term: Option<Term>| match (b, term) {
+                (Some(b), Some(t)) if b.inclusive => Bound::Included(t),
+                (Some(_), Some(t)) => Bound::Excluded(t),
+                _ => Bound::Unbounded,
+            };
+            Box::new(RangeQuery::new(bound(lower, terms.0), bound(upper, terms.1)))
         }
 
         QuerySpec::Boost { query, factor } => {
@@ -315,6 +319,7 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
             for (name, json) in document {
                 let field = schema.get_field(name)?;
                 let ft = schema.get_field_entry(field).field_type();
+                crate::documents::check_facets(name, ft, json)?;
                 let items = match json {
                     serde_json::Value::Array(items) => items.clone(),
                     other => vec![other.clone()],
@@ -455,20 +460,22 @@ impl Target<'_> {
     fn term(&self, name: &str, value: &ValueSpec) -> FfiResult<Term> {
         match self {
             Target::Plain(f, ft) => make_term(*f, name, ft, value),
+            Target::Json { .. } => self.json_term(name, value, true),
+        }
+    }
+
+    /// A term for a JSON path. With `normalize`, numbers are normalized as Tantivy does when
+    /// indexing JSON (i64 when it fits), which a term must match; a range can skip it.
+    fn json_term(&self, name: &str, value: &ValueSpec, normalize: bool) -> FfiResult<Term> {
+        match self {
+            Target::Plain(..) => unreachable!("json_term on a plain field"),
             Target::Json { field, path, expand_dots } => {
-                use tantivy::columnar::NumericalValue as N;
                 let mut term = Term::from_field_json_path(*field, path, *expand_dots);
-                // Numbers are normalized as Tantivy does when indexing JSON (i64 when it fits).
-                let number = match value {
-                    ValueSpec::U64(n) => Some(N::U64(*n)),
-                    ValueSpec::I64(n) => Some(N::I64(*n)),
-                    ValueSpec::F64(x) => Some(N::F64(*x)),
-                    _ => None,
-                };
-                match (value, number.map(N::normalize)) {
-                    (_, Some(N::I64(v))) => term.append_type_and_fast_value(v),
-                    (_, Some(N::U64(v))) => term.append_type_and_fast_value(v),
-                    (_, Some(N::F64(v))) => term.append_type_and_fast_value(v),
+                let number = number_of(value).map(|n| if normalize { n.normalize() } else { n });
+                match (value, number) {
+                    (_, Some(NumericalValue::I64(v))) => term.append_type_and_fast_value(v),
+                    (_, Some(NumericalValue::U64(v))) => term.append_type_and_fast_value(v),
+                    (_, Some(NumericalValue::F64(v))) => term.append_type_and_fast_value(v),
                     (ValueSpec::Str(s), _) => term.append_type_and_str(s),
                     (ValueSpec::Bool(b), _) => term.append_type_and_fast_value(*b),
                     (ValueSpec::Date(us), _) => term.append_type_and_fast_value(
@@ -491,6 +498,45 @@ impl Target<'_> {
             Target::Plain(_, ft) => record_option(ft),
             Target::Json { .. } => IndexRecordOption::WithFreqs,
         }
+    }
+}
+
+fn number_of(value: &ValueSpec) -> Option<NumericalValue> {
+    match value {
+        ValueSpec::U64(n) => Some(NumericalValue::U64(*n)),
+        ValueSpec::I64(n) => Some(NumericalValue::I64(*n)),
+        ValueSpec::F64(x) => Some(NumericalValue::F64(*x)),
+        _ => None,
+    }
+}
+
+/// Tantivy reads both bounds of a range on a JSON path as the type of the first (and panics when
+/// the other differs), so they're brought to one type: numbers that normalize to different kinds
+/// both become f64 (the returned flag: build them without normalizing again); other kinds must
+/// already match.
+fn unify_json_bounds(
+    name: &str,
+    lower: Option<&ValueSpec>,
+    upper: Option<&ValueSpec>,
+) -> FfiResult<(Option<ValueSpec>, Option<ValueSpec>, bool)> {
+    use std::mem::discriminant;
+    let (Some(a), Some(b)) = (lower, upper) else { return Ok((lower.cloned(), upper.cloned(), false)) };
+    let as_f64 = |n: NumericalValue| match n {
+        NumericalValue::U64(v) => v as f64,
+        NumericalValue::I64(v) => v as f64,
+        NumericalValue::F64(v) => v,
+    };
+    match (number_of(a).map(NumericalValue::normalize), number_of(b).map(NumericalValue::normalize)) {
+        (Some(x), Some(y)) if discriminant(&x) != discriminant(&y) => {
+            Ok((Some(ValueSpec::F64(as_f64(x))), Some(ValueSpec::F64(as_f64(y))), true))
+        }
+        (Some(_), Some(_)) => Ok((Some(a.clone()), Some(b.clone()), false)),
+        (None, None) if discriminant(a) == discriminant(b) => Ok((Some(a.clone()), Some(b.clone()), false)),
+        _ => Err(FfiError::invalid(format!(
+            "the bounds of a range on JSON path '{name}' must have the same type, got {} and {}",
+            value_name(a),
+            value_name(b)
+        ))),
     }
 }
 
@@ -689,6 +735,30 @@ mod tests {
     }
 
     #[test]
+    fn ranges_on_fast_json_paths_with_mixed_bound_types() {
+        // Tantivy panics when the two bounds of a JSON range have different types.
+        let f = Fixture::new(
+            r#"{"fields":[{"name":"j","type":"json","fast":true},{"name":"s","type":"json"}]}"#,
+            &[&[r#"{"j":{"n":5}}"#, r#"{"j":{"n":7.5}}"#, r#"{"j":{"n":-3,"s":"m"}}"#], &[r#"{"j":{"n":10,"s":"z"}}"#]],
+        );
+        let range = |lower: &str, upper: &str| {
+            format!(
+                r#"{{"type":"range","field":"j.n","lower":{{"value":{lower},"inclusive":true}},"upper":{{"value":{upper},"inclusive":true}}}}"#
+            )
+        };
+        assert_eq!(f.count(&range(r#"{"i64":0}"#, r#"{"f64":9.5}"#)), 2);
+        assert_eq!(f.count(&range(r#"{"f64":-3.5}"#, r#"{"u64":5}"#)), 2);
+        assert_eq!(f.count(&range(r#"{"u64":5}"#, r#"{"i64":10}"#)), 3);
+        assert_eq!(f.count(&range(r#"{"f64":5.0}"#, r#"{"u64":18446744073709551615}"#)), 3);
+        assert_invalid(&f, &range(r#"{"i64":0}"#, r#"{"str":"x"}"#), "must have the same type");
+        assert_invalid(&f, &range(r#"{"bool":true}"#, r#"{"date":0}"#), "must have the same type");
+        let strings = range(r#"{"str":"a"}"#, r#"{"str":"n"}"#).replace("j.n", "j.s");
+        assert_eq!(f.count(&strings), 1);
+        let whole = r#"{"type":"range","field":"j","lower":{"value":{"i64":0},"inclusive":true},"upper":null}"#;
+        assert_invalid(&f, whole, "query a path inside it");
+    }
+
+    #[test]
     fn fuzzy() {
         let f = books();
         assert_eq!(f.count(r#"{"type":"fuzzy","field":"title","value":"mise","distance":1}"#), 1);
@@ -809,6 +879,10 @@ mod tests {
         assert!(f.count(&mlt(r#"{"body":"salinas valley"}"#)) >= 1);
         assert_invalid(&f, &mlt(r#"{"nope":["x"]}"#), "nope");
         assert_invalid(&f, &mlt(r#"{"year":["not a number"]}"#), "field 'year'");
+        // Tantivy panics on these (Facet::from unwraps).
+        assert_invalid(&f, &mlt(r#"{"cat":["mice"]}"#), "not a facet path");
+        assert_invalid(&f, &mlt(r#"{"cat":"mice"}"#), "not a facet path");
+        assert!(f.try_count(&mlt(r#"{"cat":["/fiction"]}"#)).is_ok());
     }
 
     #[test]

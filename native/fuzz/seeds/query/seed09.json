@@ -1,0 +1,1 @@
+{"type": "disjunction_max", "queries": [{"type": "const_score", "query": {"type": "all"}, "score": 1.0}], "tie_breaker": 0.5}

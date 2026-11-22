@@ -42,11 +42,12 @@ jobs:
       - name: Format
         run: cargo fmt --check
 
+      # --all-features includes `fuzzing` (the fuzz targets' entry points; fuzz.yml runs the fuzzers).
       - name: Clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
 
       - name: Unit tests
-        run: cargo test --locked
+        run: cargo test --all-features --locked
 
   # 1. Build the Rust cdylib once per RID.
   native:

@@ -1,0 +1,1 @@
+{"type": "boost", "query": {"type": "term_set", "field": "ip", "values": [{"ip": "::1"}, {"ip": "10.0.0.1"}]}, "factor": 2.0}

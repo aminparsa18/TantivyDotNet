@@ -1,0 +1,1 @@
+{"type": "range", "field": "when", "lower": {"value": {"date": 0}, "inclusive": true}, "upper": null}

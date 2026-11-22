@@ -1,0 +1,1 @@
+{"query": {"type": "term", "field": "title", "value": {"str": "mice"}}, "limit": 1, "snippets": {"fields": ["title"]}, "aggregations": {"r": {"range": {"field": "delta", "ranges": [{"to": 0}, {"from": 0}]}}, "s": {"stats": {"field": "year"}}}}

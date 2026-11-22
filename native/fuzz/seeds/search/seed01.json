@@ -1,0 +1,1 @@
+{"query": {"type": "parse", "text": "two"}, "limit": 2, "sort": [{"type": "field", "field": "id", "order": "desc"}, {"type": "score"}], "search_after": {"keys": [{"str": "c"}, {"score": 1.0}], "addr": [0, 1]}}

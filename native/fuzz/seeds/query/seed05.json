@@ -1,0 +1,1 @@
+{"type": "boolean", "must": [{"type": "term", "field": "id", "value": {"str": "a"}}], "should": [{"type": "regex", "field": "title", "pattern": "gr.*"}], "must_not": [{"type": "exists", "field": "delta"}]}

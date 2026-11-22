@@ -1,0 +1,1 @@
+{"type": "log", "min_segments": 2, "max_docs_before_merge": 100, "min_layer_size": 10, "level_log_size": 0.75, "del_docs_ratio": 0.5}

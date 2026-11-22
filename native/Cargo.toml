@@ -8,6 +8,10 @@ publish = false
 # rlib too, so examples/ (the native timing harness) can call the search code directly.
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# Exposes `fuzzing`, the entry points of the fuzz targets in fuzz/ (not part of the C ABI).
+fuzzing = []
+
 [dependencies]
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

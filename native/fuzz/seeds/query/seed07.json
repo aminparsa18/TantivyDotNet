@@ -1,0 +1,1 @@
+{"type": "range", "field": "jf.n", "lower": {"value": {"i64": 0}, "inclusive": false}, "upper": {"value": {"f64": 9.5}, "inclusive": true}}

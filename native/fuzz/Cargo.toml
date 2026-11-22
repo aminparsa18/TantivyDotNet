@@ -1,0 +1,60 @@
+[package]
+name = "tantivy_dotnet-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = "1.4.2"
+libfuzzer-sys = "0.4.10"
+serde_json = "1.0.154"
+tantivy_dotnet = { path = "..", features = ["fuzzing"] }
+
+# Not part of the native crate's workspace.
+[workspace]
+members = ["."]
+
+# Build with `cargo fuzz build -O` (no debug assertions: Tantivy has debug-only asserts that its own
+# code trips, e.g. `seek` on an `EmptyScorer` in `explain`), but keep overflow checks, which catch
+# arithmetic that would silently wrap in the shipped release build.
+[profile.release]
+debug = 1
+overflow-checks = true
+
+[[bin]]
+name = "schema"
+path = "fuzz_targets/schema.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "query"
+path = "fuzz_targets/query.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "search"
+path = "fuzz_targets/search.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "document"
+path = "fuzz_targets/document.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "search_structured"
+path = "fuzz_targets/search_structured.rs"
+test = false
+doc = false
+bench = false

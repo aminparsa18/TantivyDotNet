@@ -1,0 +1,95 @@
+name: Fuzz
+
+# Fuzzes the native JSON entry points (native/fuzz, cargo-fuzz + libFuzzer + AddressSanitizer).
+# Short runs on changes to native/, longer ones weekly; the corpus each target grows is kept in
+# the Actions cache between runs. A crash fails the job and uploads the input that caused it:
+# reproduce with `cargo +nightly fuzz run -O <target> <file>` in native/fuzz.
+on:
+  push:
+    branches: [main]
+    paths: ['native/**', '.github/workflows/fuzz.yml']
+  pull_request:
+    paths: ['native/**', '.github/workflows/fuzz.yml']
+  schedule:
+    - cron: '17 3 * * 1'   # Mondays, 03:17 UTC
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds per target
+        default: '900'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fuzz:
+    name: fuzz (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [schema, query, search, document, search_structured]
+    defaults:
+      run:
+        working-directory: native/fuzz
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native/fuzz
+          cache-bin: true
+
+      - name: Install cargo-fuzz
+        run: command -v cargo-fuzz || cargo install cargo-fuzz --locked
+
+      - name: Restore corpus
+        uses: actions/cache/restore@v6
+        with:
+          path: native/fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      - name: Build
+        run: cargo fuzz build -O ${{ matrix.target }}
+
+      - name: Fuzz
+        env:
+          SECONDS_PER_TARGET: ${{ inputs.seconds || (github.event_name == 'schedule' && '900') || '60' }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          mkdir -p "corpus/$TARGET"
+          dict=()
+          if [ "$TARGET" != search_structured ]; then dict=(-dict=json.dict); fi
+          seeds=()
+          if [ -d "seeds/$TARGET" ]; then seeds=("seeds/$TARGET"); fi
+          cargo fuzz run -O "$TARGET" "corpus/$TARGET" "${seeds[@]}" -- \
+            "${dict[@]}" -max_total_time="$SECONDS_PER_TARGET" -rss_limit_mb=2048 -timeout=10
+
+      - name: Minimize corpus
+        if: success()
+        run: cargo fuzz cmin -O ${{ matrix.target }} corpus/${{ matrix.target }}
+
+      - name: Save corpus
+        if: success()
+        uses: actions/cache/save@v6
+        with:
+          path: native/fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+
+      - name: Upload crash
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-crash-${{ matrix.target }}
+          path: native/fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: ignore

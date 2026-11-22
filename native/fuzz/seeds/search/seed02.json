@@ -1,0 +1,1 @@
+{"query": {"type": "all"}, "limit": 3, "sort": [{"type": "field", "field": "price"}], "fields": ["title", "year"], "snippets": {"fields": ["title", "body"], "max_length": 20}}

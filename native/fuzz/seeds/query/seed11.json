@@ -1,0 +1,1 @@
+{"type": "parse", "text": "title:mice AND year:[1930 TO 1940]", "default_fields": ["title", "body"], "conjunction": true, "boosts": {"title": 2.0}, "fuzzy": {"body": {"distance": 1}}, "lenient": true}

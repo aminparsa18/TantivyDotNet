@@ -1,6 +1,7 @@
 //! Fixtures shared by the unit tests: a RAM index built from our schema JSON, documents committed
 //! in batches (one segment per batch, merges off), and helpers that run requests through the same
-//! code as the exports.
+//! code as the exports. Also the corpus of the fuzz targets (`fuzzing`).
+#![cfg_attr(not(test), allow(dead_code))]
 
 use serde_json::Value;
 use tantivy::indexer::NoMergePolicy;

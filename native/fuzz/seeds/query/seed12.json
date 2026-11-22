@@ -1,0 +1,1 @@
+{"type": "term", "field": "cat", "value": {"facet": "/fiction"}}

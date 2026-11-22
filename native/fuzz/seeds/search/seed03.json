@@ -1,0 +1,1 @@
+{"query": {"type": "all"}, "limit": 0, "facets": [{"field": "cat", "paths": ["/", "/fiction"], "top": 2}], "aggregations": {"years": {"histogram": {"field": "year", "interval": 10}, "aggs": {"p": {"avg": {"field": "price"}}}}, "t": {"terms": {"field": "id", "size": 2}}}}

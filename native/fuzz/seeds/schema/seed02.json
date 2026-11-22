@@ -1,0 +1,1 @@
+{"fields": [{"name": "t", "type": "text", "tokenizer": "re"}], "analyzers": {"re": {"tokenizer": {"type": "regex", "pattern": "[a-z]+"}}, "ws": {"tokenizer": {"type": "whitespace"}, "filters": [{"type": "stop_words", "language": "english"}]}}}
