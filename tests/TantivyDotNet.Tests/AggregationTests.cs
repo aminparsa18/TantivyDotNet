@@ -114,11 +114,11 @@ public class AggregationTests
         var results = searcher.Search("mice OR eden OR pearl", new SearchOptions
         {
             Limit = 2,
-            OrderBy = SortBy.Field("price", descending: true),
+            OrderBy = [SortBy.Field("price", descending: true)],
             Aggregations = """{"max": {"max": {"field": "year"}}}""",
         });
         Assert.Equal(3, results.TotalCount);
-        Assert.Equal([20.0, 10.0], results.Select(h => h.SortValue));
+        Assert.Equal([20.0, 10.0], results.Select(h => h.SortValues[0]));
         Assert.Equal(1952.0, results.Aggregations!.Value.GetProperty("max").GetProperty("value").GetDouble());
 
         Assert.Null(searcher.Search("mice").Aggregations);

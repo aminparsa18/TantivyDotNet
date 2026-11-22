@@ -82,7 +82,7 @@ public sealed class WikiIndex : IDisposable
         {
             Limit = PageSize,
             Offset = (Math.Max(page, 1) - 1) * PageSize,
-            OrderBy = sort == "links" ? SortBy.Field("links", descending: true) : null,
+            OrderBy = sort == "links" ? [SortBy.Field("links", descending: true)] : null,
             Snippets = new SnippetOptions("body") { MaxLength = 240 },
             Aggregations = PopularityAggregation,
         };

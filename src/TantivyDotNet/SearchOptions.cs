@@ -13,7 +13,7 @@ namespace TantivyDotNet;
 /// {
 ///     Limit = 20,
 ///     Offset = 40,
-///     OrderBy = SortBy.Field("year", descending: true),
+///     OrderBy = [SortBy.Field("year", descending: true)],
 ///     Snippets = new SnippetOptions("body"),
 ///     Facets = [new FacetRequest("genre")],
 /// });
@@ -67,8 +67,49 @@ public sealed class SearchOptions
         }
     }
 
-    /// <summary>How to order hits. Null (the default) orders by relevance, best first.</summary>
-    public SortBy? OrderBy { get; init; }
+    /// <summary>
+    /// How to order hits: one or more keys, each breaking ties of the previous ones, for example
+    /// <c>[SortBy.Field("year", descending: true), SortBy.Score()]</c>. Null or empty (the default)
+    /// orders by relevance, best first. Remaining ties keep index order.
+    /// </summary>
+    public IReadOnlyList<SortBy>? OrderBy
+    {
+        get;
+        init
+        {
+            if (value is null)
+            {
+                field = null;
+                return;
+            }
+            SortBy[] copy = [.. value];
+            if (Array.IndexOf(copy, null) >= 0) throw new ArgumentException("Sort keys can't be null.", nameof(OrderBy));
+            field = copy;
+        }
+    }
+
+    /// <summary>
+    /// Returns only hits that come after the hit whose <see cref="SearchHit.Cursor"/> this is, for
+    /// deep paging: unlike <see cref="Offset"/>, the cost doesn't grow with the page number. Null
+    /// (the default) starts from the first hit.
+    /// </summary>
+    /// <remarks>
+    /// The cursor must come from a search with the same <see cref="OrderBy"/>, and <see cref="Offset"/>
+    /// must be 0. Pages are exact when every page is read from the same <see cref="Searcher"/>; with
+    /// a newer searcher, paging continues by sort value, but documents tied on every key may be
+    /// skipped or repeated. <see cref="SearchResults.TotalCount"/> still counts all matches.
+    /// </remarks>
+    /// <example>
+    /// <code>
+    /// var options = new SearchOptions { Limit = 100, OrderBy = [SortBy.Field("date", descending: true)] };
+    /// for (var page = searcher.Search(query, options); page.Count > 0;
+    ///      page = searcher.Search(query, new SearchOptions { Limit = 100, OrderBy = options.OrderBy, SearchAfter = page[^1].Cursor }))
+    /// {
+    ///     // ...
+    /// }
+    /// </code>
+    /// </example>
+    public string? SearchAfter { get; init; }
 
     /// <summary>Fields to compute <see cref="SearchHit.Snippets"/> for, or null for none.</summary>
     public SnippetOptions? Snippets { get; init; }
@@ -132,7 +173,10 @@ public sealed class SearchOptions
         }
     }
 
-    // Shape: {"query": {...}, "limit": n, "offset": n, "sort"?: {...}, "fields"?: [...], "snippets"?: {...}, "facets"?: [...],
+    /// <summary>Identifies the sort order inside cursors, for example <c>year desc,_score</c>.</summary>
+    internal string OrderSignature => OrderBy is { Count: > 0 } keys ? string.Join(",", keys) : "_score";
+
+    // Shape: {"query": {...}, "limit": n, "offset": n, "sort"?: [...], "search_after"?: {...}, "fields"?: [...], "snippets"?: {...}, "facets"?: [...],
     // "aggregations"?: {...}} (see native/src/search.rs).
     internal byte[] ToRequestJson(Query query)
     {
@@ -144,10 +188,27 @@ public sealed class SearchOptions
             query.WriteJson(w);
             w.WriteNumber("limit", Limit);
             w.WriteNumber("offset", Offset);
-            if (OrderBy is not null)
+            if (OrderBy is { Count: > 0 })
             {
-                w.WritePropertyName("sort");
-                OrderBy.WriteJson(w);
+                w.WriteStartArray("sort");
+                foreach (var key in OrderBy) key.WriteJson(w);
+                w.WriteEndArray();
+            }
+            if (SearchAfter is not null)
+            {
+                if (Offset != 0) throw new ArgumentException("Offset must be 0 when SearchAfter is set.");
+                var cursor = HitCursor.Decode(SearchAfter);
+                if (cursor.OrderSignature != OrderSignature)
+                    throw new ArgumentException(
+                        $"SearchAfter is a cursor for order '{cursor.OrderSignature}', but this search orders by '{OrderSignature}'.");
+                w.WriteStartObject("search_after");
+                w.WritePropertyName("keys");
+                w.WriteRawValue(cursor.SortKeysJson, skipInputValidation: true);   // validated by Decode
+                w.WriteStartArray("addr");
+                w.WriteNumberValue(cursor.SegmentOrd);
+                w.WriteNumberValue(cursor.DocId);
+                w.WriteEndArray();
+                w.WriteEndObject();
             }
             if (Fields is not null)
             {
@@ -177,10 +238,14 @@ public sealed class SearchOptions
     }
 }
 
-/// <summary>An order for search hits other than relevance. Create one with <see cref="Field"/>.</summary>
+/// <summary>
+/// A sort key for <see cref="SearchOptions.OrderBy"/>. Create one with <see cref="Field"/> or <see cref="Score"/>.
+/// </summary>
 public sealed class SortBy
 {
-    private SortBy(string field, bool descending)
+    private static readonly SortBy s_score = new(null, descending: true);
+
+    private SortBy(string? field, bool descending)
     {
         FieldName = field;
         Descending = descending;
@@ -193,9 +258,10 @@ public sealed class SortBy
     /// <param name="field">The fast field to sort by.</param>
     /// <param name="descending">Largest values first. Default false: smallest first.</param>
     /// <remarks>
-    /// Documents without a value come last in either order; ties keep index order. Relevance is
-    /// not computed, so <see cref="SearchHit.Score"/> is <see cref="float.NaN"/>; the value sorted
-    /// by is in <see cref="SearchHit.SortValue"/>. For a multi-valued field, the first value is used.
+    /// Documents without a value come last in either order. Unless <see cref="Score"/> is also a key,
+    /// relevance isn't computed and <see cref="SearchHit.Score"/> is <see cref="float.NaN"/>. The
+    /// values sorted by are in <see cref="SearchHit.SortValues"/>. For a multi-valued field, the
+    /// first value is used.
     /// </remarks>
     public static SortBy Field(string field, bool descending = false)
     {
@@ -203,20 +269,74 @@ public sealed class SortBy
         return new SortBy(field, descending);
     }
 
-    /// <summary>The field sorted by.</summary>
-    public string FieldName { get; }
+    /// <summary>Orders hits by relevance, best first. Useful as a tie-breaker after a field, or before one.</summary>
+    public static SortBy Score() => s_score;
 
-    /// <summary>Whether the largest values come first.</summary>
+    /// <summary>The field sorted by, or null for <see cref="Score"/>.</summary>
+    public string? FieldName { get; }
+
+    /// <summary>Whether the largest values come first (always true for <see cref="Score"/>).</summary>
     public bool Descending { get; }
 
-    /// <summary>For example <c>year desc</c>.</summary>
-    public override string ToString() => $"{FieldName} {(Descending ? "desc" : "asc")}";
+    /// <summary>For example <c>year desc</c>, or <c>_score</c>.</summary>
+    public override string ToString() => FieldName is null ? "_score" : $"{FieldName} {(Descending ? "desc" : "asc")}";
 
     internal void WriteJson(Utf8JsonWriter w)
     {
         w.WriteStartObject();
-        w.WriteString("field", FieldName);
-        w.WriteString("order", Descending ? "desc" : "asc");
+        if (FieldName is null)
+        {
+            w.WriteString("type", "score");
+        }
+        else
+        {
+            w.WriteString("type", "field");
+            w.WriteString("field", FieldName);
+            w.WriteString("order", Descending ? "desc" : "asc");
+        }
         w.WriteEndObject();
+    }
+}
+
+/// <summary>
+/// The opaque <see cref="SearchHit.Cursor"/>: base64url of <c>{"o": order signature, "k": [tagged sort values], "a": [segment, doc]}</c>.
+/// </summary>
+internal readonly record struct HitCursor(string OrderSignature, string SortKeysJson, uint SegmentOrd, uint DocId)
+{
+    public string Encode()
+    {
+        var buffer = new ArrayBufferWriter<byte>();
+        using (var w = new Utf8JsonWriter(buffer))
+        {
+            w.WriteStartObject();
+            w.WriteString("o", OrderSignature);
+            w.WritePropertyName("k");
+            w.WriteRawValue(SortKeysJson, skipInputValidation: true);
+            w.WriteStartArray("a");
+            w.WriteNumberValue(SegmentOrd);
+            w.WriteNumberValue(DocId);
+            w.WriteEndArray();
+            w.WriteEndObject();
+        }
+        return Convert.ToBase64String(buffer.WrittenSpan).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    }
+
+    public static HitCursor Decode(string cursor)
+    {
+        try
+        {
+            string b64 = cursor.Replace('-', '+').Replace('_', '/');
+            b64 = b64.PadRight(b64.Length + (4 - b64.Length % 4) % 4, '=');
+            using var doc = JsonDocument.Parse(Convert.FromBase64String(b64));
+            var root = doc.RootElement;
+            var keys = root.GetProperty("k");
+            if (keys.ValueKind != JsonValueKind.Array) throw new FormatException();
+            var addr = root.GetProperty("a");
+            return new HitCursor(root.GetProperty("o").GetString()!, keys.GetRawText(), addr[0].GetUInt32(), addr[1].GetUInt32());
+        }
+        catch (Exception e) when (e is FormatException or JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException)
+        {
+            throw new ArgumentException("SearchAfter isn't a cursor returned by SearchHit.Cursor.", nameof(SearchOptions.SearchAfter), e);
+        }
     }
 }

@@ -102,7 +102,7 @@ public sealed unsafe class Searcher : IDisposable
             }
             resultJson = Ffi.TakeBytes(result);
         }
-        return SearchResults.Parse(resultJson, this);
+        return SearchResults.Parse(resultJson, this, options);
     }
 
     /// <summary>
@@ -214,8 +214,10 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     // Shape: {"count": n, "hits": [{"score": f, "addr": [s, d], "doc": {...}, "snippets"?: {...}}]} (see native/src/search.rs).
-    internal static SearchResults Parse(byte[] json, Searcher origin)
+    internal static SearchResults Parse(byte[] json, Searcher origin, SearchOptions options)
     {
+        string signature = options.OrderSignature;
+        bool sorted = options.OrderBy is { Count: > 0 };
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
         var hitsJson = root.GetProperty("hits");
@@ -231,7 +233,8 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
                 SegmentOrd = addr[0].GetUInt32(),
                 DocId = addr[1].GetUInt32(),
                 Snippets = h.TryGetProperty("snippets", out var sn) ? ParseSnippets(sn) : SearchHit.NoSnippets,
-                SortValue = h.TryGetProperty("sort", out var sv) ? ParseSortValue(sv) : null,
+                SortValues = sorted ? [.. h.GetProperty("sort").EnumerateArray().Select(ParseSortValue)] : SearchHit.NoSortValues,
+                CursorData = new HitCursor(signature, h.GetProperty("sort").GetRawText(), addr[0].GetUInt32(), addr[1].GetUInt32()),
             };
         }
         var facets = root.TryGetProperty("facets", out var fj) ? ParseFacets(fj) : NoFacets;
@@ -254,13 +257,14 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
         return map;
     }
 
-    // Tagged like query values: {"u64": 5}, {"date": micros}, ... or null (see native/src/sorting.rs).
+    // Tagged like query values: {"u64": 5}, {"date": micros}, {"score": f}, ... or null (see native/src/sorting.rs).
     private static object? ParseSortValue(JsonElement json)
     {
         if (json.ValueKind == JsonValueKind.Null) return null;
         var p = json.EnumerateObject().Single();
         return p.Name switch
         {
+            "score" => p.Value.GetSingle(),
             "str" => p.Value.GetString(),
             "u64" => p.Value.GetUInt64(),
             "i64" => p.Value.GetInt64(),
@@ -287,13 +291,23 @@ public sealed record SearchHit(float Score, Document Document)
 {
     internal static readonly IReadOnlyDictionary<string, Snippet> NoSnippets = new Dictionary<string, Snippet>();
 
+    internal static readonly IReadOnlyList<object?> NoSortValues = [];
+
     /// <summary>
-    /// When sorted with <see cref="SortBy.Field"/>, the hit's value of the sort field (a
-    /// <see cref="string"/>, <see cref="ulong"/>, <see cref="long"/>, <see cref="double"/>,
-    /// <see cref="bool"/>, <see cref="DateTimeOffset"/> or <see cref="T:byte[]"/>), or null if the
-    /// document has none. Null when sorted by relevance.
+    /// When <see cref="SearchOptions.OrderBy"/> is set, the hit's value for each sort key, in order:
+    /// a <see cref="string"/>, <see cref="ulong"/>, <see cref="long"/>, <see cref="double"/>,
+    /// <see cref="bool"/>, <see cref="DateTimeOffset"/> or <see cref="T:byte[]"/> for a field (null
+    /// if the document has none), or a <see cref="float"/> for <see cref="SortBy.Score"/>. Empty when
+    /// sorted by relevance only.
     /// </summary>
-    public object? SortValue { get; init; }
+    public IReadOnlyList<object?> SortValues { get; init; } = NoSortValues;
+
+    /// <summary>
+    /// An opaque token marking this hit's position in the result order. Pass it as
+    /// <see cref="SearchOptions.SearchAfter"/> (with the same <see cref="SearchOptions.OrderBy"/>) to
+    /// get the hits that follow it.
+    /// </summary>
+    public string Cursor => CursorData.Encode();
 
     /// <summary>
     /// Snippets keyed by field name, for the fields requested in <see cref="SearchOptions.Snippets"/>;
@@ -301,7 +315,8 @@ public sealed record SearchHit(float Score, Document Document)
     /// </summary>
     public IReadOnlyDictionary<string, Snippet> Snippets { get; init; } = NoSnippets;
 
-    // Where the hit came from, for Searcher.Explain. Not part of the public contract.
+    // Where the hit came from, for Searcher.Explain and Cursor. Not part of the public contract.
+    internal HitCursor CursorData { get; init; }
     internal Searcher? Origin { get; init; }
     internal uint SegmentOrd { get; init; }
     internal uint DocId { get; init; }

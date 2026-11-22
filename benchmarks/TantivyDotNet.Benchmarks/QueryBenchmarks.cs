@@ -67,7 +67,7 @@ public class QueryBenchmarks
                 if (Kind == QueryKind.SortedByField)
                 {
                     _luceneSort = new Sort(new SortField("links", SortFieldType.INT64, reverse: true));
-                    _tantivyOptions = new SearchOptions { Limit = 10, OrderBy = SortBy.Field("links", descending: true) };
+                    _tantivyOptions = new SearchOptions { Limit = 10, OrderBy = [SortBy.Field("links", descending: true)] };
                 }
                 break;
             case QueryKind.And:

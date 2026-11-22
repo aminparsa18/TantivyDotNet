@@ -1,9 +1,9 @@
 //! Running a search request: one `MultiCollector` pass for the count, the page of hits, facets
 //! and aggregations, then loading the hits' stored fields and snippets.
 //!
-//! Request: `{"query": {...}, "limit": n, "offset": n, "sort": {...}?, "fields": [...]?,
+//! Request: `{"query": {...}, "limit": n, "offset": n, "sort": [...]?, "search_after": {...}?, "fields": [...]?,
 //! "snippets": {...}?, "facets": [...]?, "aggregations": {...}?}`.
-//! Result: `{"count": <total matches>, "hits": [{"score": f|null, "sort": {...}?, "addr": [segment, doc],
+//! Result: `{"count": <total matches>, "hits": [{"score": f|null, "sort": [...], "addr": [segment, doc],
 //! "doc": {"field": [values...]}, "snippets": {...}?}], "facets": {...}?, "aggregations": {...}?}`
 //! (see the `sorting`, `snippets`, `facets` and `aggregations` modules). `limit == 0` only counts.
 
@@ -20,7 +20,7 @@ use crate::facets::{self, FacetRequest, FacetResultJson};
 use crate::ffi::{status, FfiError, FfiResult};
 use crate::query_spec::{self, QuerySpec};
 use crate::snippets::{SnippetJson, SnippetRequest, Snippets};
-use crate::sorting::{self, SortRequest};
+use crate::sorting::{self, SearchAfter, SortKeyRequest};
 use crate::aggregations;
 
 #[derive(Deserialize)]
@@ -37,7 +37,9 @@ struct SearchRequest {
     #[serde(default)]
     facets: Option<Vec<FacetRequest>>,
     #[serde(default)]
-    sort: Option<SortRequest>,
+    sort: Vec<SortKeyRequest>,
+    #[serde(default)]
+    search_after: Option<SearchAfter>,
     #[serde(default)]
     aggregations: Option<serde_json::Value>,
 }
@@ -60,8 +62,8 @@ struct SearchResultJson {
 struct HitJson {
     /// NaN when sorted by a field; serde_json writes non-finite floats as `null`.
     score: f32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sort: Option<serde_json::Value>,
+    /// One tagged value per sort key (`[{"score": f}]` when sorted by relevance); see `sorting`.
+    sort: serde_json::Value,
     /// The hit's `DocAddress` as `[segment_ord, doc_id]`, for `explain`.
     addr: [u32; 2],
     doc: NamedFieldDocument,
@@ -80,7 +82,14 @@ pub fn run(searcher: &Searcher, index: &Index, request_json: &str) -> FfiResult<
     let count_handle = collectors.add_collector(Count);
     let top_handle = match request.limit {
         0 => None,
-        limit => Some(sorting::add(request.sort.as_ref(), limit, request.offset, &schema, &mut collectors)?),
+        limit => Some(sorting::add(
+            &request.sort,
+            request.search_after.as_ref(),
+            limit,
+            request.offset,
+            &schema,
+            &mut collectors,
+        )?),
     };
     let facet_plans = match &request.facets {
         Some(f) => facets::add(f, &schema, &mut collectors)?,
@@ -93,7 +102,7 @@ pub fn run(searcher: &Searcher, index: &Index, request_json: &str) -> FfiResult<
 
     let mut fruits = searcher.search(&query, &collectors)?;
     let count = count_handle.extract(&mut fruits);
-    let top = top_handle.map(|h| sorting::extract(h, &mut fruits)).unwrap_or_default();
+    let top = top_handle.map(|h| sorting::extract(h, &mut fruits)).transpose()?.unwrap_or_default();
     let facets = request.facets.is_some().then(|| facets::collect(facet_plans, &mut fruits));
     let aggregations = agg_handle.map(|h| h.extract(&mut fruits));
 

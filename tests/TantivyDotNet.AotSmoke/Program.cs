@@ -49,7 +49,7 @@ try
     var results = searcher.Search(query, new SearchOptions
     {
         Limit = 10,
-        OrderBy = SortBy.Field("year", descending: true),
+        OrderBy = [SortBy.Field("year", descending: true)],
         Snippets = new SnippetOptions("body"),
         Facets = [new FacetRequest("genre", "/fiction")],
         Aggregations = """{"avg_year": {"avg": {"field": "year"}}}""",

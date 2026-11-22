@@ -28,7 +28,7 @@ public class SortTests
     private static string?[] Order(SearchResults r) => [.. r.Select(h => h.Document.GetString("id"))];
 
     private static SearchResults Sorted(Searcher s, string field, bool descending = false, Query? query = null) =>
-        s.Search(query ?? Query.All, new SearchOptions { OrderBy = SortBy.Field(field, descending) });
+        s.Search(query ?? Query.All, new SearchOptions { OrderBy = [SortBy.Field(field, descending)] });
 
     [Fact]
     public void SortByU64_AscendingAndDescending_MissingValuesLast()
@@ -38,7 +38,7 @@ public class SortTests
 
         var asc = Sorted(searcher, "year");
         Assert.Equal(["a", "c", "b", "d"], Order(asc));
-        Assert.Equal([1937UL, 1939UL, 1952UL, null], asc.Select(h => h.SortValue));
+        Assert.Equal([1937UL, 1939UL, 1952UL, null], asc.Select(h => h.SortValues[0]));
         Assert.All(asc, h => Assert.True(float.IsNaN(h.Score)));
 
         Assert.Equal(["b", "c", "a", "d"], Order(Sorted(searcher, "year", descending: true)));
@@ -52,22 +52,22 @@ public class SortTests
 
         var delta = Sorted(searcher, "delta");
         Assert.Equal(["a", "c", "b", "d"], Order(delta));
-        Assert.Equal([-5L, 0L, 7L, null], delta.Select(h => h.SortValue));
+        Assert.Equal([-5L, 0L, 7L, null], delta.Select(h => h.SortValues[0]));
 
         var price = Sorted(searcher, "price", descending: true);
         Assert.Equal(["b", "a", "c", "d"], Order(price));
-        Assert.Equal([20.25, 9.5, -1.0, null], price.Select(h => h.SortValue));
+        Assert.Equal([20.25, 9.5, -1.0, null], price.Select(h => h.SortValues[0]));
 
         var published = Sorted(searcher, "published");
         Assert.Equal(["c", "a", "b", "d"], Order(published));
-        Assert.Equal(new DateTimeOffset(2024, 3, 1, 12, 0, 0, TimeSpan.Zero), published[1].SortValue);
+        Assert.Equal(new DateTimeOffset(2024, 3, 1, 12, 0, 0, TimeSpan.Zero), published[1].SortValues[0]);
 
         var active = Sorted(searcher, "active", descending: true);
-        Assert.Equal([true, true, false, null], active.Select(h => h.SortValue));
+        Assert.Equal([true, true, false, null], active.Select(h => h.SortValues[0]));
 
         var name = Sorted(searcher, "name");                                  // ordinal: uppercase first
         Assert.Equal(["c", "a", "b", "d"], Order(name));
-        Assert.Equal(["Grapes", "Mice", "eden", null], name.Select(h => h.SortValue));
+        Assert.Equal(["Grapes", "Mice", "eden", null], name.Select(h => h.SortValues[0]));
     }
 
     [Fact]
@@ -79,15 +79,15 @@ public class SortTests
         Assert.Equal(["b", "c", "a"], Order(Sorted(searcher, "year", descending: true, query: Query.Range("year", 0, null))));
         Assert.Equal(["c", "a"], Order(Sorted(searcher, "year", descending: true, query: Query.Term("title", "mice"))));
 
-        var page = searcher.Search(Query.All, new SearchOptions { OrderBy = SortBy.Field("year", descending: true), Limit = 2, Offset = 1 });
+        var page = searcher.Search(Query.All, new SearchOptions { OrderBy = [SortBy.Field("year", descending: true)], Limit = 2, Offset = 1 });
         Assert.Equal(["c", "a"], Order(page));
         Assert.Equal(4, page.TotalCount);
 
-        var countOnly = searcher.Search("mice", new SearchOptions { OrderBy = SortBy.Field("year"), Limit = 0 });
+        var countOnly = searcher.Search("mice", new SearchOptions { OrderBy = [SortBy.Field("year")], Limit = 0 });
         Assert.Empty(countOnly);
         Assert.Equal(2, countOnly.TotalCount);
 
-        var withSnippets = searcher.Search("mice", new SearchOptions { OrderBy = SortBy.Field("year"), Snippets = new SnippetOptions("title") });
+        var withSnippets = searcher.Search("mice", new SearchOptions { OrderBy = [SortBy.Field("year")], Snippets = new SnippetOptions("title") });
         Assert.Equal(["a", "c"], Order(withSnippets));
         Assert.Equal("mice", withSnippets[0].Snippets["title"].Fragment[withSnippets[0].Snippets["title"].Highlights[0]]);
     }
@@ -101,7 +101,7 @@ public class SortTests
         foreach (var results in new[] { searcher.Search("mice"), searcher.Search("mice", new SearchOptions()), searcher.Search(Query.Parse("mice"), limit: 5) })
         {
             Assert.Equal(2, results.Count);
-            Assert.All(results, h => Assert.Null(h.SortValue));
+            Assert.All(results, h => Assert.Empty(h.SortValues));
             Assert.All(results, h => Assert.True(h.Score > 0));
         }
     }
