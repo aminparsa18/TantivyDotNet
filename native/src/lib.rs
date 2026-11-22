@@ -22,24 +22,15 @@ mod facets;
 mod ffi;
 mod query_spec;
 mod schema_spec;
+mod search;
 mod snippets;
 mod sorting;
 
-use std::collections::BTreeMap;
 use std::sync::Mutex;
 
-use serde::{Deserialize, Serialize};
-use tantivy::aggregation::agg_result::AggregationResults;
-use tantivy::collector::{Count, MultiCollector};
-use tantivy::schema::{NamedFieldDocument, Schema};
-use tantivy::{
-    Document, Index, IndexReader, IndexWriter, ReloadPolicy, Searcher, TantivyDocument, Term,
-};
+use tantivy::schema::Schema;
+use tantivy::{DocAddress, Index, IndexReader, IndexWriter, ReloadPolicy, Searcher, TantivyDocument, Term};
 
-use facets::{FacetRequest, FacetResultJson};
-use query_spec::QuerySpec;
-use snippets::{SnippetJson, SnippetRequest, Snippets};
-use sorting::SortRequest;
 use ffi::{guard, handle, str_arg, write_out, FfiError, FfiResult};
 
 /// Bumped whenever the exported C ABI changes; the managed side checks it on load.
@@ -398,54 +389,7 @@ pub unsafe extern "C" fn tdn_searcher_num_docs(searcher: *const TdnSearcher) -> 
     searcher.as_ref().map_or(0, |s| s.searcher.num_docs())
 }
 
-#[derive(Serialize)]
-struct SearchResultJson {
-    count: usize,
-    hits: Vec<HitJson>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    facets: Option<FacetResultJson>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    aggregations: Option<AggregationResults>,
-}
-
-#[derive(Serialize)]
-struct HitJson {
-    /// NaN when sorted by a field; serde_json writes non-finite floats as `null`.
-    score: f32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    sort: Option<serde_json::Value>,
-    doc: NamedFieldDocument,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    snippets: Option<BTreeMap<String, SnippetJson>>,
-}
-
-#[derive(Deserialize)]
-struct SearchRequest {
-    query: QuerySpec,
-    #[serde(default = "default_limit")]
-    limit: usize,
-    #[serde(default)]
-    offset: usize,
-    #[serde(default)]
-    snippets: Option<SnippetRequest>,
-    #[serde(default)]
-    facets: Option<Vec<FacetRequest>>,
-    #[serde(default)]
-    sort: Option<SortRequest>,
-    #[serde(default)]
-    aggregations: Option<serde_json::Value>,
-}
-
-fn default_limit() -> usize {
-    10
-}
-
-/// Runs a search described by request JSON (see `query_spec` for the query part):
-/// `{"query": {...}, "limit": n, "offset": n, "sort": {...}?, "snippets": {...}?, "facets": [...]?, "aggregations": {...}?}`,
-/// and returns `{"count": <total matches>, "hits": [{"score": f|null, "sort": {...}?, "doc": {"field": [values...]},
-/// "snippets": {...}?}], "facets": {...}?, "aggregations": {...}?}`
-/// (see the `sorting`, `snippets`, `facets` and `aggregations` modules).
-/// `limit == 0` only counts.
+/// Runs a search described by request JSON and returns result JSON (see `search`).
 #[no_mangle]
 pub unsafe extern "C" fn tdn_searcher_search(
     searcher: *const TdnSearcher,
@@ -456,52 +400,29 @@ pub unsafe extern "C" fn tdn_searcher_search(
 ) -> i32 {
     guard(err, || {
         let s = handle(searcher, "searcher")?;
-        let request_json = str_arg(request_ptr, request_len, "search request")?;
-        let request: SearchRequest = serde_json::from_str(request_json)
-            .map_err(|e| FfiError::invalid(format!("invalid search request JSON: {e}")))?;
-        let schema = s.index.schema();
-        let query = query_spec::build(&request.query, &s.index)?;
-
-        let mut collectors = MultiCollector::new();
-        let count_handle = collectors.add_collector(Count);
-        let top_handle = match request.limit {
-            0 => None,
-            limit => Some(sorting::add(request.sort.as_ref(), limit, request.offset, &schema, &mut collectors)?),
-        };
-        let facet_plans = match &request.facets {
-            Some(f) => facets::add(f, &schema, &mut collectors)?,
-            None => Vec::new(),
-        };
-
-        let agg_handle = match &request.aggregations {
-            Some(a) => Some(aggregations::add(a, &s.index, &mut collectors)?),
-            None => None,
-        };
-
-        let mut fruits = s.searcher.search(&query, &collectors)?;
-        let count = count_handle.extract(&mut fruits);
-        let top = top_handle.map(|h| sorting::extract(h, &mut fruits)).unwrap_or_default();
-        let facets = request.facets.is_some().then(|| facets::collect(facet_plans, &mut fruits));
-        let aggregations = agg_handle.map(|h| h.extract(&mut fruits));
-
-        // Built even with no hits, so an invalid snippet field fails consistently.
-        let snippets = request
-            .snippets
-            .as_ref()
-            .map(|r| Snippets::new(r, &s.searcher, query.as_ref()))
-            .transpose()?;
-        let hits = top
-            .into_iter()
-            .map(|(score, sort, address)| {
-                let doc: TantivyDocument = s.searcher.doc(address)?;
-                let snippets = snippets.as_ref().map(|g| g.for_doc(&doc));
-                Ok(HitJson { score, sort, doc: doc.to_named_doc(&schema), snippets })
-            })
-            .collect::<FfiResult<Vec<_>>>()?;
-
-        let json = serde_json::to_string(&SearchResultJson { count, hits, facets, aggregations })
-            .map_err(|e| FfiError::new(ffi::status::ERROR, format!("result serialization: {e}")))?;
+        let request = str_arg(request_ptr, request_len, "search request")?;
+        let json = search::run(&s.searcher, &s.index, request)?;
         write_out(out, TdnString::from_string(json), "result")
+    })
+}
+
+/// Explains the score of the document at `[segment_ord, doc_id]` (a hit's `addr`) for a query
+/// JSON; returns Tantivy's explanation JSON (see `search::explain`).
+#[no_mangle]
+pub unsafe extern "C" fn tdn_searcher_explain(
+    searcher: *const TdnSearcher,
+    query_ptr: *const u8,
+    query_len: usize,
+    segment_ord: u32,
+    doc_id: u32,
+    out: *mut TdnString,
+    err: *mut TdnString,
+) -> i32 {
+    guard(err, || {
+        let s = handle(searcher, "searcher")?;
+        let query = str_arg(query_ptr, query_len, "query")?;
+        let json = search::explain(&s.searcher, &s.index, query, DocAddress::new(segment_ord, doc_id))?;
+        write_out(out, TdnString::from_string(json), "explanation")
     })
 }
 

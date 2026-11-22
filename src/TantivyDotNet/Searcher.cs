@@ -102,7 +102,36 @@ public sealed unsafe class Searcher : IDisposable
             }
             resultJson = Ffi.TakeBytes(result);
         }
-        return SearchResults.Parse(resultJson);
+        return SearchResults.Parse(resultJson, this);
+    }
+
+    /// <summary>
+    /// Explains how <paramref name="query"/> scores the document of <paramref name="hit"/>, for
+    /// debugging relevance. The hit must come from this searcher.
+    /// </summary>
+    /// <example><c>Console.WriteLine(searcher.Explain(query, results[0]));</c></example>
+    /// <exception cref="ArgumentException"><paramref name="hit"/> came from another searcher.</exception>
+    /// <exception cref="TantivyException">
+    /// With <see cref="TantivyErrorCode.InvalidArgument"/> if the query doesn't match the document,
+    /// or doesn't fit the schema.
+    /// </exception>
+    public Explanation Explain(Query query, SearchHit hit)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(hit);
+        if (!ReferenceEquals(hit.Origin, this))
+            throw new ArgumentException("The hit comes from a different searcher; explain it with the searcher that returned it.", nameof(hit));
+        byte[] q = query.ToJson();
+        string json;
+        using (var lease = _handle.Lease())
+        {
+            TdnString result, err;
+            fixed (byte* qp = q)
+                Ffi.Check(NativeMethods.tdn_searcher_explain((TdnSearcher*)lease.Pointer, qp, (nuint)q.Length, hit.SegmentOrd, hit.DocId, &result, &err), err);
+            json = Ffi.TakeString(result);
+        }
+        using var doc = JsonDocument.Parse(json);
+        return Explanation.Parse(doc.RootElement);
     }
 
     /// <summary>Counts the documents matching <paramref name="query"/> without retrieving them.</summary>
@@ -184,8 +213,8 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-    // Shape: {"count": n, "hits": [{"score": f, "doc": {...}, "snippets"?: {...}}]} (see tdn_searcher_search).
-    internal static SearchResults Parse(byte[] json)
+    // Shape: {"count": n, "hits": [{"score": f, "addr": [s, d], "doc": {...}, "snippets"?: {...}}]} (see native/src/search.rs).
+    internal static SearchResults Parse(byte[] json, Searcher origin)
     {
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
@@ -195,8 +224,12 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
         foreach (var h in hitsJson.EnumerateArray())
         {
             var score = h.GetProperty("score");
+            var addr = h.GetProperty("addr");
             hits[i++] = new SearchHit(score.ValueKind == JsonValueKind.Null ? float.NaN : score.GetSingle(), new Document(h.GetProperty("doc").Clone()))
             {
+                Origin = origin,
+                SegmentOrd = addr[0].GetUInt32(),
+                DocId = addr[1].GetUInt32(),
                 Snippets = h.TryGetProperty("snippets", out var sn) ? ParseSnippets(sn) : SearchHit.NoSnippets,
                 SortValue = h.TryGetProperty("sort", out var sv) ? ParseSortValue(sv) : null,
             };
@@ -267,4 +300,9 @@ public sealed record SearchHit(float Score, Document Document)
     /// empty if none were requested.
     /// </summary>
     public IReadOnlyDictionary<string, Snippet> Snippets { get; init; } = NoSnippets;
+
+    // Where the hit came from, for Searcher.Explain. Not part of the public contract.
+    internal Searcher? Origin { get; init; }
+    internal uint SegmentOrd { get; init; }
+    internal uint DocId { get; init; }
 }

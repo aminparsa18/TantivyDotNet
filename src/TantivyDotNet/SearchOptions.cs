@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace TantivyDotNet;
 
 /// <summary>
-/// Everything about a search besides the query: paging, ordering, snippets, facet counts and aggregations.
+/// Everything about a search besides the query: paging, ordering, returned fields, snippets, facet counts and aggregations.
 /// Pass it to <see cref="Searcher.Search(Query, SearchOptions)"/>.
 /// </summary>
 /// <example>
@@ -42,6 +42,28 @@ public sealed class SearchOptions
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
             field = value;
+        }
+    }
+
+    /// <summary>
+    /// The stored fields to return in each hit's <see cref="SearchHit.Document"/>, or null (the
+    /// default) for all of them. Fewer fields means less to decode and copy per hit; an empty list
+    /// returns no fields and skips the document store entirely (unless <see cref="Snippets"/> are requested).
+    /// </summary>
+    /// <remarks>Each name must be a stored field, or the search throws <see cref="TantivyException"/> with <see cref="TantivyErrorCode.InvalidArgument"/>.</remarks>
+    public IReadOnlyList<string>? Fields
+    {
+        get;
+        init
+        {
+            if (value is null)
+            {
+                field = null;
+                return;
+            }
+            string[] copy = [.. value];
+            if (Array.IndexOf(copy, null) >= 0) throw new ArgumentException("Field names can't be null.", nameof(Fields));
+            field = copy;
         }
     }
 
@@ -110,8 +132,8 @@ public sealed class SearchOptions
         }
     }
 
-    // Shape: {"query": {...}, "limit": n, "offset": n, "sort"?: {...}, "snippets"?: {...}, "facets"?: [...], "aggregations"?: {...}}
-    // (see tdn_searcher_search in native/src/lib.rs).
+    // Shape: {"query": {...}, "limit": n, "offset": n, "sort"?: {...}, "fields"?: [...], "snippets"?: {...}, "facets"?: [...],
+    // "aggregations"?: {...}} (see native/src/search.rs).
     internal byte[] ToRequestJson(Query query)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -126,6 +148,12 @@ public sealed class SearchOptions
             {
                 w.WritePropertyName("sort");
                 OrderBy.WriteJson(w);
+            }
+            if (Fields is not null)
+            {
+                w.WriteStartArray("fields");
+                foreach (var f in Fields) w.WriteStringValue(f);
+                w.WriteEndArray();
             }
             if (Snippets is not null)
             {

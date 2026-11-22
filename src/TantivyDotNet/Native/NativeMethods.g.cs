@@ -133,15 +133,17 @@ namespace TantivyDotNet.Native
         internal static extern ulong tdn_searcher_num_docs(TdnSearcher* searcher);
 
         /// <summary>
-        ///  Runs a search described by request JSON (see `query_spec` for the query part):
-        ///  `{"query": {...}, "limit": n, "offset": n, "sort": {...}?, "snippets": {...}?, "facets": [...]?, "aggregations": {...}?}`,
-        ///  and returns `{"count": &lt;total matches&gt;, "hits": [{"score": f|null, "sort": {...}?, "doc": {"field": [values...]},
-        ///  "snippets": {...}?}], "facets": {...}?, "aggregations": {...}?}`
-        ///  (see the `sorting`, `snippets`, `facets` and `aggregations` modules).
-        ///  `limit == 0` only counts.
+        ///  Runs a search described by request JSON and returns result JSON (see `search`).
         /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_searcher_search", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int tdn_searcher_search(TdnSearcher* searcher, byte* request_ptr, nuint request_len, TdnString* @out, TdnString* err);
+
+        /// <summary>
+        ///  Explains the score of the document at `[segment_ord, doc_id]` (a hit's `addr`) for a query
+        ///  JSON; returns Tantivy's explanation JSON (see `search::explain`).
+        /// </summary>
+        [DllImport(__DllName, EntryPoint = "tdn_searcher_explain", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
+        internal static extern int tdn_searcher_explain(TdnSearcher* searcher, byte* query_ptr, nuint query_len, uint segment_ord, uint doc_id, TdnString* @out, TdnString* err);
 
         [DllImport(__DllName, EntryPoint = "tdn_searcher_free", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern void tdn_searcher_free(TdnSearcher* searcher);
