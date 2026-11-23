@@ -17,6 +17,12 @@ public enum TantivyErrorCode
     LockBusy = 6,
     /// <summary>The native code hit an internal bug (a Rust panic). Please report it.</summary>
     Panic = 7,
+    /// <summary>
+    /// The index on disk uses a Tantivy index format this version can't read: it was written by a
+    /// release whose Tantivy format is no longer supported, or by a newer release. Reindex the data,
+    /// or read it with the release that wrote it.
+    /// </summary>
+    IncompatibleIndex = 8,
 }
 
 /// <summary>An error reported by the native Tantivy engine.</summary>

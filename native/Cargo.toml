@@ -2,6 +2,7 @@
 name = "tantivy_dotnet"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 publish = false
 
 [lib]
@@ -23,3 +24,8 @@ csbindgen = "1.9.8"
 [profile.release]
 lto = true
 codegen-units = 1
+# Line tables (function names, files, lines) for symbolicating native crashes. They stay out of the
+# shipped library: with the default split-debuginfo, Windows writes a .pdb and macOS a .dSYM; on
+# Linux CI moves the DWARF of the .so into a .debug file (llvm-objcopy). They're attached to the
+# GitHub Release, not the package.
+debug = "line-tables-only"

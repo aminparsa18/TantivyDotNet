@@ -1,0 +1,44 @@
+# cargo-deny: licenses, security advisories, banned/duplicate crates and crate sources.
+# CI runs `cargo deny check` (job `deny` in .github/workflows/ci.yml); locally: cd native && cargo deny check
+
+[graph]
+# The targets the package ships; dependencies only used elsewhere (wasm, UEFI, ...) are ignored.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+[advisories]
+# RustSec advisory database: vulnerabilities and unsound crates fail the check; unmaintained
+# crates only when they're direct dependencies (a transitive one is Tantivy's to replace).
+unmaintained = "workspace"
+yanked = "deny"
+ignore = []
+
+[licenses]
+# Permissive licenses only: the native library is statically linked into a MIT package that
+# users ship inside their applications. Crates with a choice (MIT OR Apache-2.0, ...) pass when
+# one alternative is allowed. THIRD-PARTY-NOTICES.txt (cargo-about) reproduces the texts.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Unicode-3.0",
+    "Zlib",
+]
+confidence-threshold = 0.9
+
+[bans]
+# Duplicate versions of a crate are reported but don't fail (they come from Tantivy's dependency
+# tree, e.g. two windows-sys versions); `cargo deny check bans` lists them.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

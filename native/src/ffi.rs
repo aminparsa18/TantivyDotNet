@@ -4,7 +4,8 @@
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 use tantivy::aggregation::AggregationError;
-use tantivy::TantivyError;
+use tantivy::directory::error::{Incompatibility, OpenReadError};
+use tantivy::{TantivyError, INDEX_FORMAT_OLDEST_SUPPORTED_VERSION, INDEX_FORMAT_VERSION};
 
 use crate::TdnString;
 
@@ -18,6 +19,7 @@ pub mod status {
     pub const IO: i32 = 5;
     pub const LOCK_BUSY: i32 = 6;
     pub const PANIC: i32 = 7;
+    pub const INCOMPATIBLE_INDEX: i32 = 8;
 }
 
 #[derive(Debug)]
@@ -38,6 +40,13 @@ impl FfiError {
 
 impl From<TantivyError> for FfiError {
     fn from(e: TantivyError) -> Self {
+        // An index (segment) format this Tantivy can't read: Tantivy's own message tells Rust users
+        // to change their tantivy dependency, which a .NET user can't act on.
+        if let TantivyError::IncompatibleIndex(inc)
+        | TantivyError::OpenReadError(OpenReadError::IncompatibleIndex(inc)) = &e
+        {
+            return Self::new(status::INCOMPATIBLE_INDEX, incompatible_message(inc));
+        }
         let code = match &e {
             TantivyError::IndexAlreadyExists => status::INDEX_ALREADY_EXISTS,
             TantivyError::LockFailure(..) => status::LOCK_BUSY,
@@ -54,6 +63,21 @@ impl From<TantivyError> for FfiError {
             _ => status::ERROR,
         };
         Self::new(code, e.to_string())
+    }
+}
+
+fn incompatible_message(inc: &Incompatibility) -> String {
+    let library = tantivy::version();
+    match inc {
+        Incompatibility::IndexMismatch { index_version, .. } => format!(
+            "the index was written by {index_version}, which this TantivyDotNet ({library}) can't read: it reads \
+             index formats {INDEX_FORMAT_OLDEST_SUPPORTED_VERSION} to {INDEX_FORMAT_VERSION}. Reindex the data, \
+             or read it with the TantivyDotNet release that wrote it"
+        ),
+        Incompatibility::CompressionMismatch { index_compression_format, .. } => format!(
+            "the index's doc store uses {index_compression_format} compression, which this TantivyDotNet \
+             ({library}) doesn't support. Reindex the data, or read it with the TantivyDotNet release that wrote it"
+        ),
     }
 }
 
@@ -123,5 +147,27 @@ pub unsafe fn write_out<T>(out: *mut T, value: T, what: &str) -> FfiResult<()> {
 pub unsafe fn free_box<T>(ptr: *mut T) {
     if !ptr.is_null() {
         let _ = catch_unwind(AssertUnwindSafe(|| drop(Box::from_raw(ptr))));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn incompatible_index_has_its_own_status() {
+        let inc = || Incompatibility::CompressionMismatch {
+            library_compression_format: "lz4".into(),
+            index_compression_format: "snappy".into(),
+        };
+        for e in [
+            TantivyError::IncompatibleIndex(inc()),
+            TantivyError::OpenReadError(OpenReadError::IncompatibleIndex(inc())),
+        ] {
+            let ffi = FfiError::from(e);
+            assert_eq!(ffi.code, status::INCOMPATIBLE_INDEX);
+            assert!(ffi.message.contains("snappy compression"), "{}", ffi.message);
+            assert!(ffi.message.contains("Reindex"), "{}", ffi.message);
+        }
     }
 }

@@ -32,6 +32,8 @@ jobs:
   fuzz:
     name: fuzz (${{ matrix.target }})
     runs-on: ubuntu-24.04
+    env:
+      RUSTUP_TOOLCHAIN: nightly
     strategy:
       fail-fast: false
       matrix:
@@ -40,11 +42,13 @@ jobs:
       run:
         working-directory: native/fuzz
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: dtolnay/rust-toolchain@nightly
+      # cargo-fuzz needs nightly; RUSTUP_TOOLCHAIN (job env) overrides native/rust-toolchain.toml.
+      - name: Rust toolchain
+        run: rustup toolchain install nightly --profile minimal
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: native/fuzz
           cache-bin: true
@@ -53,7 +57,7 @@ jobs:
         run: command -v cargo-fuzz || cargo install cargo-fuzz --locked
 
       - name: Restore corpus
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: native/fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
@@ -81,14 +85,14 @@ jobs:
 
       - name: Save corpus
         if: success()
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: native/fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
 
       - name: Upload crash
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: fuzz-crash-${{ matrix.target }}
           path: native/fuzz/artifacts/${{ matrix.target }}/

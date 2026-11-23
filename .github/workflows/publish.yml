@@ -24,7 +24,7 @@ jobs:
       contents: read
       id-token: write   # GitHub OIDC token, exchanged by NuGet/login for a short-lived API key
     steps:
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: nupkg
           path: artifacts/packages
@@ -38,7 +38,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           dotnet-version: 11.0.x
 
@@ -46,12 +46,50 @@ jobs:
       # that owns the trusted-publishing policy for this repository and publish.yml.
       - name: NuGet login
         id: login
-        uses: NuGet/login@v1
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
         with:
           user: ${{ secrets.NUGET_USER }}
 
+      # Also pushes the .snupkg next to the .nupkg (symbols go to nuget.org's symbol server).
       - name: Push to nuget.org
         run: >
           dotnet nuget push "artifacts/packages/*.nupkg"
           --api-key "${{ steps.login.outputs.NUGET_API_KEY }}"
           --source https://api.nuget.org/v3/index.json
+
+  # A GitHub Release for the tag, with the packages and each RID's native debug symbols (.pdb,
+  # .dSYM, .debug; see "Split debug symbols" in ci.yml) for symbolicating native crash dumps.
+  github-release:
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write   # create the release
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: nupkg
+          path: release
+
+      # Each symbols-<rid> artifact holds a <rid>/ folder.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: symbols-*
+          path: symbols
+          merge-multiple: true
+
+      - name: Zip native symbols
+        run: |
+          for dir in symbols/*/; do
+            rid=$(basename "$dir")
+            (cd "$dir" && zip -qr "$GITHUB_WORKSPACE/release/tantivy_dotnet-${GITHUB_REF_NAME#v}-$rid-symbols.zip" .)
+          done
+          ls -l release
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prerelease=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then prerelease=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" \
+            --verify-tag --title "$GITHUB_REF_NAME" --generate-notes "${prerelease[@]}"

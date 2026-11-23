@@ -17,6 +17,11 @@
     <Using Include="Xunit" />
   </ItemGroup>
 
+  <!-- Indexes written by released versions (Compat/CompatibilityTests.cs, tests/TantivyDotNet.CompatFixture). -->
+  <ItemGroup>
+    <None Include="Compat/Indexes/*.zip" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
   <!-- The child process of the crash tests; referenced so its build output (dll, runtimeconfig, deps) is copied next to the tests. -->
   <ItemGroup>
     <ProjectReference Include="../TantivyDotNet.CrashHelper/TantivyDotNet.CrashHelper.csproj" />

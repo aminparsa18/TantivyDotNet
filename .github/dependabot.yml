@@ -1,0 +1,40 @@
+# Weekly dependency updates. Minor and patch updates are grouped into one PR per ecosystem;
+# major ones get their own PR. Workflow actions are pinned to commit SHAs with the version in a
+# comment, which Dependabot keeps up to date.
+#
+# Not covered: the Rust toolchain (native/rust-toolchain.toml) and the tools pinned inside
+# workflows (cargo-zigbuild, ziglang, cargo-deny, cargo-about, reportgenerator); bump those by hand.
+# Tantivy updates (0.x minor = breaking) need the upgrade checklist in README "Upgrades".
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+
+  - package-ecosystem: cargo
+    directories: [/native, /native/fuzz]
+    schedule:
+      interval: weekly
+    groups:
+      cargo:
+        update-types: [minor, patch]
+        # Tantivy releases (0.x minor = breaking, may change the index format) get their own PR.
+        exclude-patterns: ['tantivy*']
+
+  - package-ecosystem: nuget
+    directories: [/src/*, /tests/*, /benchmarks/*, /samples/*]
+    schedule:
+      interval: weekly
+    groups:
+      nuget:
+        update-types: [minor, patch]
+
+  # The SDK in global.json.
+  - package-ecosystem: dotnet-sdk
+    directory: /
+    schedule:
+      interval: weekly

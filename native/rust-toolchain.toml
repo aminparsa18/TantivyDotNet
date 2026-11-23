@@ -1,0 +1,7 @@
+# The Rust release that builds the shipped native libraries, locally and in CI (rustup installs it
+# on first use). Pinned so a tagged commit rebuilds the same way and new lints don't break CI
+# unannounced; bump it in its own commit. The fuzzers use nightly (RUSTUP_TOOLCHAIN=nightly).
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy", "llvm-tools"]
+profile = "minimal"

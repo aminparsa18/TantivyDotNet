@@ -1,0 +1,495 @@
+#nullable enable
+override TantivyDotNet.Analyzer.Equals(object? obj) -> bool
+override TantivyDotNet.Analyzer.GetHashCode() -> int
+override TantivyDotNet.Analyzer.ToString() -> string!
+override TantivyDotNet.Document.ToString() -> string!
+override TantivyDotNet.Explanation.ToString() -> string!
+override TantivyDotNet.FacetCount.Equals(object? obj) -> bool
+override TantivyDotNet.FacetCount.GetHashCode() -> int
+override TantivyDotNet.FacetCount.ToString() -> string!
+override TantivyDotNet.FieldDefinition.Equals(object? obj) -> bool
+override TantivyDotNet.FieldDefinition.GetHashCode() -> int
+override TantivyDotNet.FieldDefinition.ToString() -> string!
+override TantivyDotNet.FieldStats.Equals(object? obj) -> bool
+override TantivyDotNet.FieldStats.GetHashCode() -> int
+override TantivyDotNet.FieldStats.ToString() -> string!
+override TantivyDotNet.FuzzyOptions.Equals(object? obj) -> bool
+override TantivyDotNet.FuzzyOptions.GetHashCode() -> int
+override TantivyDotNet.FuzzyOptions.ToString() -> string!
+override TantivyDotNet.GarbageCollectionResult.Equals(object? obj) -> bool
+override TantivyDotNet.GarbageCollectionResult.GetHashCode() -> int
+override TantivyDotNet.GarbageCollectionResult.ToString() -> string!
+override TantivyDotNet.IndexSettings.ToString() -> string!
+override TantivyDotNet.IndexStats.ToString() -> string!
+override TantivyDotNet.LogMergePolicy.ToString() -> string!
+override TantivyDotNet.Query.ToString() -> string!
+override TantivyDotNet.SegmentStats.Equals(object? obj) -> bool
+override TantivyDotNet.SegmentStats.GetHashCode() -> int
+override TantivyDotNet.SegmentStats.ToString() -> string!
+override TantivyDotNet.Snippet.ToString() -> string!
+override TantivyDotNet.SortBy.ToString() -> string!
+static TantivyDotNet.Analyzer.NGram(int minGram, int maxGram, bool prefixOnly = false) -> TantivyDotNet.Analyzer!
+static TantivyDotNet.Analyzer.Raw() -> TantivyDotNet.Analyzer!
+static TantivyDotNet.Analyzer.Regex(string! pattern) -> TantivyDotNet.Analyzer!
+static TantivyDotNet.Analyzer.Simple() -> TantivyDotNet.Analyzer!
+static TantivyDotNet.Analyzer.Whitespace() -> TantivyDotNet.Analyzer!
+static TantivyDotNet.FacetCount.operator !=(TantivyDotNet.FacetCount? left, TantivyDotNet.FacetCount? right) -> bool
+static TantivyDotNet.FacetCount.operator ==(TantivyDotNet.FacetCount? left, TantivyDotNet.FacetCount? right) -> bool
+static TantivyDotNet.FieldDefinition.operator !=(TantivyDotNet.FieldDefinition? left, TantivyDotNet.FieldDefinition? right) -> bool
+static TantivyDotNet.FieldDefinition.operator ==(TantivyDotNet.FieldDefinition? left, TantivyDotNet.FieldDefinition? right) -> bool
+static TantivyDotNet.FieldStats.operator !=(TantivyDotNet.FieldStats? left, TantivyDotNet.FieldStats? right) -> bool
+static TantivyDotNet.FieldStats.operator ==(TantivyDotNet.FieldStats? left, TantivyDotNet.FieldStats? right) -> bool
+static TantivyDotNet.FuzzyOptions.operator !=(TantivyDotNet.FuzzyOptions? left, TantivyDotNet.FuzzyOptions? right) -> bool
+static TantivyDotNet.FuzzyOptions.operator ==(TantivyDotNet.FuzzyOptions? left, TantivyDotNet.FuzzyOptions? right) -> bool
+static TantivyDotNet.GarbageCollectionResult.operator !=(TantivyDotNet.GarbageCollectionResult? left, TantivyDotNet.GarbageCollectionResult? right) -> bool
+static TantivyDotNet.GarbageCollectionResult.operator ==(TantivyDotNet.GarbageCollectionResult? left, TantivyDotNet.GarbageCollectionResult? right) -> bool
+static TantivyDotNet.IndexSettings.Default.get -> TantivyDotNet.IndexSettings!
+static TantivyDotNet.MergePolicy.Default.get -> TantivyDotNet.MergePolicy!
+static TantivyDotNet.MergePolicy.None.get -> TantivyDotNet.MergePolicy!
+static TantivyDotNet.Query.All.get -> TantivyDotNet.Query!
+static TantivyDotNet.Query.Boolean(System.Collections.Generic.IEnumerable<TantivyDotNet.Query!>? must = null, System.Collections.Generic.IEnumerable<TantivyDotNet.Query!>? should = null, System.Collections.Generic.IEnumerable<TantivyDotNet.Query!>? mustNot = null) -> TantivyDotNet.BooleanQuery!
+static TantivyDotNet.Query.DisjunctionMax(System.Collections.Generic.IEnumerable<TantivyDotNet.Query!>! queries, float tieBreaker = 0) -> TantivyDotNet.DisjunctionMaxQuery!
+static TantivyDotNet.Query.Exists(string! field) -> TantivyDotNet.ExistsQuery!
+static TantivyDotNet.Query.Facet(string! field, string! path) -> TantivyDotNet.FacetQuery!
+static TantivyDotNet.Query.Fuzzy(string! field, string! value, int distance = 1, bool transpositions = true, bool prefix = false) -> TantivyDotNet.FuzzyQuery!
+static TantivyDotNet.Query.MoreLikeThis(System.Collections.Generic.IReadOnlyDictionary<string!, string!>! fieldTexts, TantivyDotNet.MoreLikeThisOptions? options = null) -> TantivyDotNet.MoreLikeThisQuery!
+static TantivyDotNet.Query.MoreLikeThis(TantivyDotNet.Document! document, TantivyDotNet.MoreLikeThisOptions? options = null) -> TantivyDotNet.MoreLikeThisQuery!
+static TantivyDotNet.Query.operator !(TantivyDotNet.Query! query) -> TantivyDotNet.Query!
+static TantivyDotNet.Query.operator &(TantivyDotNet.Query! left, TantivyDotNet.Query! right) -> TantivyDotNet.Query!
+static TantivyDotNet.Query.operator |(TantivyDotNet.Query! left, TantivyDotNet.Query! right) -> TantivyDotNet.Query!
+static TantivyDotNet.Query.Parse(string! text, System.Collections.Generic.IEnumerable<string!>? defaultFields = null) -> TantivyDotNet.ParsedQuery!
+static TantivyDotNet.Query.Parse(string! text, TantivyDotNet.QueryParserOptions! options) -> TantivyDotNet.ParsedQuery!
+static TantivyDotNet.Query.Phrase(string! field, string! text, int slop = 0) -> TantivyDotNet.PhraseQuery!
+static TantivyDotNet.Query.Range(string! field, double? lower, double? upper, bool includeLower = true, bool includeUpper = true) -> TantivyDotNet.RangeQuery!
+static TantivyDotNet.Query.Range(string! field, long? lower, long? upper, bool includeLower = true, bool includeUpper = true) -> TantivyDotNet.RangeQuery!
+static TantivyDotNet.Query.Range(string! field, string? lower, string? upper, bool includeLower = true, bool includeUpper = true) -> TantivyDotNet.RangeQuery!
+static TantivyDotNet.Query.Range(string! field, System.DateTime? lower, System.DateTime? upper, bool includeLower = true, bool includeUpper = true) -> TantivyDotNet.RangeQuery!
+static TantivyDotNet.Query.Range(string! field, System.DateTimeOffset? lower, System.DateTimeOffset? upper, bool includeLower = true, bool includeUpper = true) -> TantivyDotNet.RangeQuery!
+static TantivyDotNet.Query.Range(string! field, System.Net.IPAddress? lower, System.Net.IPAddress? upper, bool includeLower = true, bool includeUpper = true) -> TantivyDotNet.RangeQuery!
+static TantivyDotNet.Query.Range(string! field, ulong? lower, ulong? upper, bool includeLower = true, bool includeUpper = true) -> TantivyDotNet.RangeQuery!
+static TantivyDotNet.Query.Regex(string! field, string! pattern) -> TantivyDotNet.RegexQuery!
+static TantivyDotNet.Query.Term(string! field, bool value) -> TantivyDotNet.TermQuery!
+static TantivyDotNet.Query.Term(string! field, double value) -> TantivyDotNet.TermQuery!
+static TantivyDotNet.Query.Term(string! field, long value) -> TantivyDotNet.TermQuery!
+static TantivyDotNet.Query.Term(string! field, string! value) -> TantivyDotNet.TermQuery!
+static TantivyDotNet.Query.Term(string! field, System.DateTime value) -> TantivyDotNet.TermQuery!
+static TantivyDotNet.Query.Term(string! field, System.DateTimeOffset value) -> TantivyDotNet.TermQuery!
+static TantivyDotNet.Query.Term(string! field, System.Net.IPAddress! value) -> TantivyDotNet.TermQuery!
+static TantivyDotNet.Query.Term(string! field, System.ReadOnlySpan<byte> value) -> TantivyDotNet.TermQuery!
+static TantivyDotNet.Query.Term(string! field, ulong value) -> TantivyDotNet.TermQuery!
+static TantivyDotNet.Query.TermSet(string! field, System.Collections.Generic.IEnumerable<long>! values) -> TantivyDotNet.TermSetQuery!
+static TantivyDotNet.Query.TermSet(string! field, System.Collections.Generic.IEnumerable<string!>! values) -> TantivyDotNet.TermSetQuery!
+static TantivyDotNet.Query.TermSet(string! field, System.Collections.Generic.IEnumerable<System.Net.IPAddress!>! values) -> TantivyDotNet.TermSetQuery!
+static TantivyDotNet.Query.TermSet(string! field, System.Collections.Generic.IEnumerable<ulong>! values) -> TantivyDotNet.TermSetQuery!
+static TantivyDotNet.SearchIndex.Create(string! directory, TantivyDotNet.Schema! schema, TantivyDotNet.IndexSettings? settings = null) -> TantivyDotNet.SearchIndex!
+static TantivyDotNet.SearchIndex.CreateInRam(TantivyDotNet.Schema! schema, TantivyDotNet.IndexSettings? settings = null) -> TantivyDotNet.SearchIndex!
+static TantivyDotNet.SearchIndex.Open(string! directory) -> TantivyDotNet.SearchIndex!
+static TantivyDotNet.SegmentStats.operator !=(TantivyDotNet.SegmentStats? left, TantivyDotNet.SegmentStats? right) -> bool
+static TantivyDotNet.SegmentStats.operator ==(TantivyDotNet.SegmentStats? left, TantivyDotNet.SegmentStats? right) -> bool
+static TantivyDotNet.SortBy.Field(string! field, bool descending = false) -> TantivyDotNet.SortBy!
+static TantivyDotNet.SortBy.Score() -> TantivyDotNet.SortBy!
+TantivyDotNet.AllQuery
+TantivyDotNet.Analyzer
+TantivyDotNet.Analyzer.AsciiFolding() -> TantivyDotNet.Analyzer!
+TantivyDotNet.Analyzer.Equals(TantivyDotNet.Analyzer? other) -> bool
+TantivyDotNet.Analyzer.LowerCase() -> TantivyDotNet.Analyzer!
+TantivyDotNet.Analyzer.RemoveLong(int maxBytes) -> TantivyDotNet.Analyzer!
+TantivyDotNet.Analyzer.Stem(TantivyDotNet.AnalyzerLanguage language) -> TantivyDotNet.Analyzer!
+TantivyDotNet.Analyzer.StopWords(System.Collections.Generic.IEnumerable<string!>! words) -> TantivyDotNet.Analyzer!
+TantivyDotNet.Analyzer.StopWords(TantivyDotNet.AnalyzerLanguage language) -> TantivyDotNet.Analyzer!
+TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Arabic = 0 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Danish = 1 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Dutch = 2 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.English = 3 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Finnish = 4 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.French = 5 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.German = 6 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Greek = 7 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Hungarian = 8 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Italian = 9 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Norwegian = 10 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Portuguese = 11 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Romanian = 12 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Russian = 13 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Spanish = 14 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Swedish = 15 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Tamil = 16 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.AnalyzerLanguage.Turkish = 17 -> TantivyDotNet.AnalyzerLanguage
+TantivyDotNet.BooleanQuery
+TantivyDotNet.BooleanQuery.Must.get -> System.Collections.Generic.IReadOnlyList<TantivyDotNet.Query!>!
+TantivyDotNet.BooleanQuery.MustNot.get -> System.Collections.Generic.IReadOnlyList<TantivyDotNet.Query!>!
+TantivyDotNet.BooleanQuery.Should.get -> System.Collections.Generic.IReadOnlyList<TantivyDotNet.Query!>!
+TantivyDotNet.BoostQuery
+TantivyDotNet.BoostQuery.Factor.get -> float
+TantivyDotNet.BoostQuery.Query.get -> TantivyDotNet.Query!
+TantivyDotNet.ConstantScoreQuery
+TantivyDotNet.ConstantScoreQuery.Query.get -> TantivyDotNet.Query!
+TantivyDotNet.ConstantScoreQuery.Score.get -> float
+TantivyDotNet.DisjunctionMaxQuery
+TantivyDotNet.DisjunctionMaxQuery.Queries.get -> System.Collections.Generic.IReadOnlyList<TantivyDotNet.Query!>!
+TantivyDotNet.DisjunctionMaxQuery.TieBreaker.get -> float
+TantivyDotNet.DocStoreCompression
+TantivyDotNet.DocStoreCompression.Lz4 = 0 -> TantivyDotNet.DocStoreCompression
+TantivyDotNet.DocStoreCompression.None = 2 -> TantivyDotNet.DocStoreCompression
+TantivyDotNet.DocStoreCompression.Zstd = 1 -> TantivyDotNet.DocStoreCompression
+TantivyDotNet.Document
+TantivyDotNet.Document.Contains(string! field) -> bool
+TantivyDotNet.Document.FieldNames.get -> System.Collections.Generic.IEnumerable<string!>!
+TantivyDotNet.Document.GetBool(string! field) -> bool?
+TantivyDotNet.Document.GetBytes(string! field) -> byte[]?
+TantivyDotNet.Document.GetDate(string! field) -> System.DateTimeOffset?
+TantivyDotNet.Document.GetF64(string! field) -> double?
+TantivyDotNet.Document.GetI64(string! field) -> long?
+TantivyDotNet.Document.GetIpAddress(string! field) -> System.Net.IPAddress?
+TantivyDotNet.Document.GetString(string! field) -> string?
+TantivyDotNet.Document.GetStrings(string! field) -> System.Collections.Generic.IReadOnlyList<string!>!
+TantivyDotNet.Document.GetU64(string! field) -> ulong?
+TantivyDotNet.Document.GetValues(string! field) -> System.Collections.Generic.IReadOnlyList<System.Text.Json.JsonElement>!
+TantivyDotNet.Document.ToJson() -> string!
+TantivyDotNet.ExistsQuery
+TantivyDotNet.ExistsQuery.Field.get -> string!
+TantivyDotNet.Explanation
+TantivyDotNet.Explanation.Context.get -> System.Collections.Generic.IReadOnlyList<string!>!
+TantivyDotNet.Explanation.Description.get -> string!
+TantivyDotNet.Explanation.Details.get -> System.Collections.Generic.IReadOnlyList<TantivyDotNet.Explanation!>!
+TantivyDotNet.Explanation.Value.get -> float
+TantivyDotNet.FacetCount
+TantivyDotNet.FacetCount.<Clone>$() -> TantivyDotNet.FacetCount!
+TantivyDotNet.FacetCount.Count.get -> long
+TantivyDotNet.FacetCount.Count.init -> void
+TantivyDotNet.FacetCount.Deconstruct(out string! Path, out long Count) -> void
+TantivyDotNet.FacetCount.Equals(TantivyDotNet.FacetCount? other) -> bool
+TantivyDotNet.FacetCount.FacetCount(string! Path, long Count) -> void
+TantivyDotNet.FacetCount.Path.get -> string!
+TantivyDotNet.FacetCount.Path.init -> void
+TantivyDotNet.FacetQuery
+TantivyDotNet.FacetQuery.Field.get -> string!
+TantivyDotNet.FacetQuery.Path.get -> string!
+TantivyDotNet.FacetRequest
+TantivyDotNet.FacetRequest.FacetRequest(string! field, params System.Collections.Generic.IEnumerable<string!>! paths) -> void
+TantivyDotNet.FacetRequest.Field.get -> string!
+TantivyDotNet.FacetRequest.Paths.get -> System.Collections.Generic.IReadOnlyList<string!>!
+TantivyDotNet.FacetRequest.Top.get -> int?
+TantivyDotNet.FacetRequest.Top.init -> void
+TantivyDotNet.FieldDefinition
+TantivyDotNet.FieldDefinition.<Clone>$() -> TantivyDotNet.FieldDefinition!
+TantivyDotNet.FieldDefinition.Deconstruct(out string! Name, out TantivyDotNet.FieldType Type, out bool Stored, out bool Indexed, out bool Fast, out string? Tokenizer) -> void
+TantivyDotNet.FieldDefinition.Equals(TantivyDotNet.FieldDefinition? other) -> bool
+TantivyDotNet.FieldDefinition.Fast.get -> bool
+TantivyDotNet.FieldDefinition.Fast.init -> void
+TantivyDotNet.FieldDefinition.FieldDefinition(string! Name, TantivyDotNet.FieldType Type, bool Stored, bool Indexed, bool Fast, string? Tokenizer) -> void
+TantivyDotNet.FieldDefinition.Indexed.get -> bool
+TantivyDotNet.FieldDefinition.Indexed.init -> void
+TantivyDotNet.FieldDefinition.Name.get -> string!
+TantivyDotNet.FieldDefinition.Name.init -> void
+TantivyDotNet.FieldDefinition.Stored.get -> bool
+TantivyDotNet.FieldDefinition.Stored.init -> void
+TantivyDotNet.FieldDefinition.Tokenizer.get -> string?
+TantivyDotNet.FieldDefinition.Tokenizer.init -> void
+TantivyDotNet.FieldDefinition.Type.get -> TantivyDotNet.FieldType
+TantivyDotNet.FieldDefinition.Type.init -> void
+TantivyDotNet.FieldStats
+TantivyDotNet.FieldStats.<Clone>$() -> TantivyDotNet.FieldStats!
+TantivyDotNet.FieldStats.Deconstruct(out string! Name, out long TermDictionaryBytes, out long PostingsBytes, out long PositionsBytes, out long FastFieldBytes, out long FieldNormBytes) -> void
+TantivyDotNet.FieldStats.Equals(TantivyDotNet.FieldStats? other) -> bool
+TantivyDotNet.FieldStats.FastFieldBytes.get -> long
+TantivyDotNet.FieldStats.FastFieldBytes.init -> void
+TantivyDotNet.FieldStats.FieldNormBytes.get -> long
+TantivyDotNet.FieldStats.FieldNormBytes.init -> void
+TantivyDotNet.FieldStats.FieldStats(string! Name, long TermDictionaryBytes, long PostingsBytes, long PositionsBytes, long FastFieldBytes, long FieldNormBytes) -> void
+TantivyDotNet.FieldStats.Name.get -> string!
+TantivyDotNet.FieldStats.Name.init -> void
+TantivyDotNet.FieldStats.PositionsBytes.get -> long
+TantivyDotNet.FieldStats.PositionsBytes.init -> void
+TantivyDotNet.FieldStats.PostingsBytes.get -> long
+TantivyDotNet.FieldStats.PostingsBytes.init -> void
+TantivyDotNet.FieldStats.TermDictionaryBytes.get -> long
+TantivyDotNet.FieldStats.TermDictionaryBytes.init -> void
+TantivyDotNet.FieldStats.TotalBytes.get -> long
+TantivyDotNet.FieldType
+TantivyDotNet.FieldType.Bool = 4 -> TantivyDotNet.FieldType
+TantivyDotNet.FieldType.Bytes = 6 -> TantivyDotNet.FieldType
+TantivyDotNet.FieldType.Date = 5 -> TantivyDotNet.FieldType
+TantivyDotNet.FieldType.F64 = 3 -> TantivyDotNet.FieldType
+TantivyDotNet.FieldType.Facet = 7 -> TantivyDotNet.FieldType
+TantivyDotNet.FieldType.I64 = 2 -> TantivyDotNet.FieldType
+TantivyDotNet.FieldType.IpAddress = 9 -> TantivyDotNet.FieldType
+TantivyDotNet.FieldType.Json = 8 -> TantivyDotNet.FieldType
+TantivyDotNet.FieldType.Other = 10 -> TantivyDotNet.FieldType
+TantivyDotNet.FieldType.Text = 0 -> TantivyDotNet.FieldType
+TantivyDotNet.FieldType.U64 = 1 -> TantivyDotNet.FieldType
+TantivyDotNet.FuzzyOptions
+TantivyDotNet.FuzzyOptions.<Clone>$() -> TantivyDotNet.FuzzyOptions!
+TantivyDotNet.FuzzyOptions.Distance.get -> int
+TantivyDotNet.FuzzyOptions.Equals(TantivyDotNet.FuzzyOptions? other) -> bool
+TantivyDotNet.FuzzyOptions.FuzzyOptions(int distance = 1, bool transpositions = true, bool prefix = false) -> void
+TantivyDotNet.FuzzyOptions.Prefix.get -> bool
+TantivyDotNet.FuzzyOptions.Transpositions.get -> bool
+TantivyDotNet.FuzzyQuery
+TantivyDotNet.FuzzyQuery.Distance.get -> int
+TantivyDotNet.FuzzyQuery.Field.get -> string!
+TantivyDotNet.FuzzyQuery.Prefix.get -> bool
+TantivyDotNet.FuzzyQuery.Transpositions.get -> bool
+TantivyDotNet.FuzzyQuery.Value.get -> string!
+TantivyDotNet.GarbageCollectionResult
+TantivyDotNet.GarbageCollectionResult.<Clone>$() -> TantivyDotNet.GarbageCollectionResult!
+TantivyDotNet.GarbageCollectionResult.Deconstruct(out System.Collections.Generic.IReadOnlyList<string!>! DeletedFiles, out System.Collections.Generic.IReadOnlyList<string!>! FailedFiles) -> void
+TantivyDotNet.GarbageCollectionResult.DeletedFiles.get -> System.Collections.Generic.IReadOnlyList<string!>!
+TantivyDotNet.GarbageCollectionResult.DeletedFiles.init -> void
+TantivyDotNet.GarbageCollectionResult.Equals(TantivyDotNet.GarbageCollectionResult? other) -> bool
+TantivyDotNet.GarbageCollectionResult.FailedFiles.get -> System.Collections.Generic.IReadOnlyList<string!>!
+TantivyDotNet.GarbageCollectionResult.FailedFiles.init -> void
+TantivyDotNet.GarbageCollectionResult.GarbageCollectionResult(System.Collections.Generic.IReadOnlyList<string!>! DeletedFiles, System.Collections.Generic.IReadOnlyList<string!>! FailedFiles) -> void
+TantivyDotNet.IndexSettings
+TantivyDotNet.IndexSettings.DocStoreBlockSize.get -> int
+TantivyDotNet.IndexSettings.DocStoreBlockSize.init -> void
+TantivyDotNet.IndexSettings.DocStoreCompression.get -> TantivyDotNet.DocStoreCompression
+TantivyDotNet.IndexSettings.DocStoreCompression.init -> void
+TantivyDotNet.IndexSettings.IndexSettings() -> void
+TantivyDotNet.IndexSettings.ZstdLevel.get -> int?
+TantivyDotNet.IndexSettings.ZstdLevel.init -> void
+TantivyDotNet.IndexStats
+TantivyDotNet.IndexStats.DeletedDocumentCount.get -> long
+TantivyDotNet.IndexStats.DocumentCount.get -> long
+TantivyDotNet.IndexStats.Fields.get -> System.Collections.Generic.IReadOnlyList<TantivyDotNet.FieldStats!>!
+TantivyDotNet.IndexStats.SegmentCount.get -> int
+TantivyDotNet.IndexStats.Segments.get -> System.Collections.Generic.IReadOnlyList<TantivyDotNet.SegmentStats!>!
+TantivyDotNet.IndexStats.SizeBytes.get -> long
+TantivyDotNet.IndexWriter
+TantivyDotNet.IndexWriter.AddDocument(object! document) -> void
+TantivyDotNet.IndexWriter.AddDocument(string! json) -> void
+TantivyDotNet.IndexWriter.AddDocument(System.ReadOnlySpan<byte> utf8Json) -> void
+TantivyDotNet.IndexWriter.AddDocument<T>(T document, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T>! typeInfo) -> void
+TantivyDotNet.IndexWriter.Commit() -> void
+TantivyDotNet.IndexWriter.DeleteAllDocuments() -> void
+TantivyDotNet.IndexWriter.DeleteDocuments(TantivyDotNet.Query! query) -> void
+TantivyDotNet.IndexWriter.DeleteTerm(string! field, long value) -> void
+TantivyDotNet.IndexWriter.DeleteTerm(string! field, string! value) -> void
+TantivyDotNet.IndexWriter.DeleteTerm(string! field, ulong value) -> void
+TantivyDotNet.IndexWriter.Dispose() -> void
+TantivyDotNet.IndexWriter.ForceMerge(int maxSegments = 1) -> void
+TantivyDotNet.IndexWriter.GarbageCollectFiles() -> TantivyDotNet.GarbageCollectionResult!
+TantivyDotNet.IndexWriter.Rollback() -> void
+TantivyDotNet.IndexWriter.UpdateDocument(TantivyDotNet.TermQuery! term, object! document) -> void
+TantivyDotNet.IndexWriter.UpdateDocument(TantivyDotNet.TermQuery! term, string! json) -> void
+TantivyDotNet.IndexWriter.UpdateDocument(TantivyDotNet.TermQuery! term, System.ReadOnlySpan<byte> utf8Json) -> void
+TantivyDotNet.IndexWriter.UpdateDocument<T>(TantivyDotNet.TermQuery! term, T document, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T>! typeInfo) -> void
+TantivyDotNet.IndexWriterOptions
+TantivyDotNet.IndexWriterOptions.HeapBytes.get -> long
+TantivyDotNet.IndexWriterOptions.HeapBytes.init -> void
+TantivyDotNet.IndexWriterOptions.IgnoreUnknownFields.get -> bool
+TantivyDotNet.IndexWriterOptions.IgnoreUnknownFields.init -> void
+TantivyDotNet.IndexWriterOptions.IndexWriterOptions() -> void
+TantivyDotNet.IndexWriterOptions.MergePolicy.get -> TantivyDotNet.MergePolicy!
+TantivyDotNet.IndexWriterOptions.MergePolicy.init -> void
+TantivyDotNet.IndexWriterOptions.ThreadCount.get -> int?
+TantivyDotNet.IndexWriterOptions.ThreadCount.init -> void
+TantivyDotNet.LogMergePolicy
+TantivyDotNet.LogMergePolicy.DeletedDocsRatio.get -> double
+TantivyDotNet.LogMergePolicy.DeletedDocsRatio.init -> void
+TantivyDotNet.LogMergePolicy.LevelLogSize.get -> double
+TantivyDotNet.LogMergePolicy.LevelLogSize.init -> void
+TantivyDotNet.LogMergePolicy.LogMergePolicy() -> void
+TantivyDotNet.LogMergePolicy.MaxDocsBeforeMerge.get -> int
+TantivyDotNet.LogMergePolicy.MaxDocsBeforeMerge.init -> void
+TantivyDotNet.LogMergePolicy.MinLayerSize.get -> int
+TantivyDotNet.LogMergePolicy.MinLayerSize.init -> void
+TantivyDotNet.LogMergePolicy.MinSegments.get -> int
+TantivyDotNet.LogMergePolicy.MinSegments.init -> void
+TantivyDotNet.MergePolicy
+TantivyDotNet.MoreLikeThisOptions
+TantivyDotNet.MoreLikeThisOptions.BoostFactor.get -> float?
+TantivyDotNet.MoreLikeThisOptions.BoostFactor.init -> void
+TantivyDotNet.MoreLikeThisOptions.MaxDocFrequency.get -> long?
+TantivyDotNet.MoreLikeThisOptions.MaxDocFrequency.init -> void
+TantivyDotNet.MoreLikeThisOptions.MaxQueryTerms.get -> int?
+TantivyDotNet.MoreLikeThisOptions.MaxQueryTerms.init -> void
+TantivyDotNet.MoreLikeThisOptions.MaxWordLength.get -> int?
+TantivyDotNet.MoreLikeThisOptions.MaxWordLength.init -> void
+TantivyDotNet.MoreLikeThisOptions.MinDocFrequency.get -> long?
+TantivyDotNet.MoreLikeThisOptions.MinDocFrequency.init -> void
+TantivyDotNet.MoreLikeThisOptions.MinTermFrequency.get -> int?
+TantivyDotNet.MoreLikeThisOptions.MinTermFrequency.init -> void
+TantivyDotNet.MoreLikeThisOptions.MinWordLength.get -> int?
+TantivyDotNet.MoreLikeThisOptions.MinWordLength.init -> void
+TantivyDotNet.MoreLikeThisOptions.MoreLikeThisOptions() -> void
+TantivyDotNet.MoreLikeThisOptions.StopWords.get -> System.Collections.Generic.IReadOnlyList<string!>?
+TantivyDotNet.MoreLikeThisOptions.StopWords.init -> void
+TantivyDotNet.MoreLikeThisQuery
+TantivyDotNet.MoreLikeThisQuery.Options.get -> TantivyDotNet.MoreLikeThisOptions!
+TantivyDotNet.ParsedQuery
+TantivyDotNet.ParsedQuery.DefaultFields.get -> System.Collections.Generic.IReadOnlyList<string!>?
+TantivyDotNet.ParsedQuery.Options.get -> TantivyDotNet.QueryParserOptions!
+TantivyDotNet.ParsedQuery.Text.get -> string!
+TantivyDotNet.PhraseQuery
+TantivyDotNet.PhraseQuery.Field.get -> string!
+TantivyDotNet.PhraseQuery.Slop.get -> int
+TantivyDotNet.PhraseQuery.Text.get -> string!
+TantivyDotNet.Query
+TantivyDotNet.Query.Boost(float factor) -> TantivyDotNet.BoostQuery!
+TantivyDotNet.Query.ConstantScore(float score = 1) -> TantivyDotNet.ConstantScoreQuery!
+TantivyDotNet.QueryOperator
+TantivyDotNet.QueryOperator.And = 1 -> TantivyDotNet.QueryOperator
+TantivyDotNet.QueryOperator.Or = 0 -> TantivyDotNet.QueryOperator
+TantivyDotNet.QueryParseException
+TantivyDotNet.QueryParseException.QueryParseException(string! message) -> void
+TantivyDotNet.QueryParserOptions
+TantivyDotNet.QueryParserOptions.DefaultFields.get -> System.Collections.Generic.IReadOnlyList<string!>?
+TantivyDotNet.QueryParserOptions.DefaultFields.init -> void
+TantivyDotNet.QueryParserOptions.DefaultOperator.get -> TantivyDotNet.QueryOperator
+TantivyDotNet.QueryParserOptions.DefaultOperator.init -> void
+TantivyDotNet.QueryParserOptions.FieldBoosts.get -> System.Collections.Generic.IReadOnlyDictionary<string!, float>?
+TantivyDotNet.QueryParserOptions.FieldBoosts.init -> void
+TantivyDotNet.QueryParserOptions.FuzzyFields.get -> System.Collections.Generic.IReadOnlyDictionary<string!, TantivyDotNet.FuzzyOptions!>?
+TantivyDotNet.QueryParserOptions.FuzzyFields.init -> void
+TantivyDotNet.QueryParserOptions.Lenient.get -> bool
+TantivyDotNet.QueryParserOptions.Lenient.init -> void
+TantivyDotNet.QueryParserOptions.QueryParserOptions() -> void
+TantivyDotNet.RangeQuery
+TantivyDotNet.RangeQuery.Field.get -> string!
+TantivyDotNet.RangeQuery.IncludeLower.get -> bool
+TantivyDotNet.RangeQuery.IncludeUpper.get -> bool
+TantivyDotNet.RangeQuery.Lower.get -> object?
+TantivyDotNet.RangeQuery.Upper.get -> object?
+TantivyDotNet.RegexQuery
+TantivyDotNet.RegexQuery.Field.get -> string!
+TantivyDotNet.RegexQuery.Pattern.get -> string!
+TantivyDotNet.Schema
+TantivyDotNet.Schema.Analyzers.get -> System.Collections.Generic.IReadOnlyDictionary<string!, TantivyDotNet.Analyzer!>!
+TantivyDotNet.Schema.Fields.get -> System.Collections.Generic.IReadOnlyList<TantivyDotNet.FieldDefinition!>!
+TantivyDotNet.Schema.this[string! name].get -> TantivyDotNet.FieldDefinition!
+TantivyDotNet.Schema.TryGetField(string! name, out TantivyDotNet.FieldDefinition! field) -> bool
+TantivyDotNet.SchemaBuilder
+TantivyDotNet.SchemaBuilder.AddAnalyzer(string! name, TantivyDotNet.Analyzer! analyzer) -> TantivyDotNet.SchemaBuilder!
+TantivyDotNet.SchemaBuilder.AddBoolField(string! name, bool stored = false, bool indexed = true, bool fast = false) -> TantivyDotNet.SchemaBuilder!
+TantivyDotNet.SchemaBuilder.AddBytesField(string! name, bool stored = false, bool indexed = true, bool fast = false) -> TantivyDotNet.SchemaBuilder!
+TantivyDotNet.SchemaBuilder.AddDateField(string! name, bool stored = false, bool indexed = true, bool fast = false) -> TantivyDotNet.SchemaBuilder!
+TantivyDotNet.SchemaBuilder.AddF64Field(string! name, bool stored = false, bool indexed = true, bool fast = false) -> TantivyDotNet.SchemaBuilder!
+TantivyDotNet.SchemaBuilder.AddFacetField(string! name, bool stored = false) -> TantivyDotNet.SchemaBuilder!
+TantivyDotNet.SchemaBuilder.AddI64Field(string! name, bool stored = false, bool indexed = true, bool fast = false) -> TantivyDotNet.SchemaBuilder!
+TantivyDotNet.SchemaBuilder.AddIpAddressField(string! name, bool stored = false, bool indexed = true, bool fast = false) -> TantivyDotNet.SchemaBuilder!
+TantivyDotNet.SchemaBuilder.AddJsonField(string! name, bool stored = false, bool fast = false, string! tokenizer = "default") -> TantivyDotNet.SchemaBuilder!
+TantivyDotNet.SchemaBuilder.AddStringField(string! name, bool stored = false, bool fast = false) -> TantivyDotNet.SchemaBuilder!
+TantivyDotNet.SchemaBuilder.AddTextField(string! name, bool stored = false, bool fast = false, string! tokenizer = "default") -> TantivyDotNet.SchemaBuilder!
+TantivyDotNet.SchemaBuilder.AddU64Field(string! name, bool stored = false, bool indexed = true, bool fast = false) -> TantivyDotNet.SchemaBuilder!
+TantivyDotNet.SchemaBuilder.Build() -> TantivyDotNet.Schema!
+TantivyDotNet.SchemaBuilder.SchemaBuilder() -> void
+TantivyDotNet.Searcher
+TantivyDotNet.Searcher.Count(string! query, System.Collections.Generic.IEnumerable<string!>? defaultFields = null) -> long
+TantivyDotNet.Searcher.Count(TantivyDotNet.Query! query) -> long
+TantivyDotNet.Searcher.Dispose() -> void
+TantivyDotNet.Searcher.DocumentCount.get -> long
+TantivyDotNet.Searcher.Explain(TantivyDotNet.Query! query, TantivyDotNet.SearchHit! hit) -> TantivyDotNet.Explanation!
+TantivyDotNet.Searcher.GetStats() -> TantivyDotNet.IndexStats!
+TantivyDotNet.Searcher.Schema.get -> TantivyDotNet.Schema!
+TantivyDotNet.Searcher.Search(string! query, int limit = 10, int offset = 0, System.Collections.Generic.IEnumerable<string!>? defaultFields = null) -> TantivyDotNet.SearchResults!
+TantivyDotNet.Searcher.Search(string! query, TantivyDotNet.SearchOptions! options) -> TantivyDotNet.SearchResults!
+TantivyDotNet.Searcher.Search(TantivyDotNet.Query! query, int limit = 10, int offset = 0) -> TantivyDotNet.SearchResults!
+TantivyDotNet.Searcher.Search(TantivyDotNet.Query! query, TantivyDotNet.SearchOptions! options) -> TantivyDotNet.SearchResults!
+TantivyDotNet.SearcherLease
+TantivyDotNet.SearcherLease.Dispose() -> void
+TantivyDotNet.SearcherLease.Searcher.get -> TantivyDotNet.Searcher!
+TantivyDotNet.SearcherManager
+TantivyDotNet.SearcherManager.Acquire() -> TantivyDotNet.SearcherLease!
+TantivyDotNet.SearcherManager.Dispose() -> void
+TantivyDotNet.SearcherManager.Refresh() -> bool
+TantivyDotNet.SearcherManagerOptions
+TantivyDotNet.SearcherManagerOptions.RefreshOnCommit.get -> bool
+TantivyDotNet.SearcherManagerOptions.RefreshOnCommit.init -> void
+TantivyDotNet.SearcherManagerOptions.SearcherManagerOptions() -> void
+TantivyDotNet.SearcherManagerOptions.Warmer.get -> System.Action<TantivyDotNet.Searcher!>?
+TantivyDotNet.SearcherManagerOptions.Warmer.init -> void
+TantivyDotNet.SearchHit
+TantivyDotNet.SearchHit.Cursor.get -> string!
+TantivyDotNet.SearchHit.Document.get -> TantivyDotNet.Document!
+TantivyDotNet.SearchHit.Score.get -> float
+TantivyDotNet.SearchHit.Snippets.get -> System.Collections.Generic.IReadOnlyDictionary<string!, TantivyDotNet.Snippet!>!
+TantivyDotNet.SearchHit.Snippets.init -> void
+TantivyDotNet.SearchHit.SortValues.get -> System.Collections.Generic.IReadOnlyList<object?>!
+TantivyDotNet.SearchHit.SortValues.init -> void
+TantivyDotNet.SearchIndex
+TantivyDotNet.SearchIndex.Analyze(string! tokenizer, string! text) -> System.Collections.Generic.IReadOnlyList<string!>!
+TantivyDotNet.SearchIndex.CreateSearcher() -> TantivyDotNet.Searcher!
+TantivyDotNet.SearchIndex.CreateSearcherManager(TantivyDotNet.SearcherManagerOptions? options = null) -> TantivyDotNet.SearcherManager!
+TantivyDotNet.SearchIndex.CreateWriter(long heapBytes = 50000000, int? threadCount = null) -> TantivyDotNet.IndexWriter!
+TantivyDotNet.SearchIndex.CreateWriter(TantivyDotNet.IndexWriterOptions! options) -> TantivyDotNet.IndexWriter!
+TantivyDotNet.SearchIndex.Dispose() -> void
+TantivyDotNet.SearchIndex.GetStats() -> TantivyDotNet.IndexStats!
+TantivyDotNet.SearchIndex.Schema.get -> TantivyDotNet.Schema!
+TantivyDotNet.SearchIndex.Settings.get -> TantivyDotNet.IndexSettings!
+TantivyDotNet.SearchOptions
+TantivyDotNet.SearchOptions.Aggregations.get -> string?
+TantivyDotNet.SearchOptions.Aggregations.init -> void
+TantivyDotNet.SearchOptions.Facets.get -> System.Collections.Generic.IReadOnlyList<TantivyDotNet.FacetRequest!>?
+TantivyDotNet.SearchOptions.Facets.init -> void
+TantivyDotNet.SearchOptions.Fields.get -> System.Collections.Generic.IReadOnlyList<string!>?
+TantivyDotNet.SearchOptions.Fields.init -> void
+TantivyDotNet.SearchOptions.Limit.get -> int
+TantivyDotNet.SearchOptions.Limit.init -> void
+TantivyDotNet.SearchOptions.Offset.get -> int
+TantivyDotNet.SearchOptions.Offset.init -> void
+TantivyDotNet.SearchOptions.OrderBy.get -> System.Collections.Generic.IReadOnlyList<TantivyDotNet.SortBy!>?
+TantivyDotNet.SearchOptions.OrderBy.init -> void
+TantivyDotNet.SearchOptions.SearchAfter.get -> string?
+TantivyDotNet.SearchOptions.SearchAfter.init -> void
+TantivyDotNet.SearchOptions.SearchOptions() -> void
+TantivyDotNet.SearchOptions.Snippets.get -> TantivyDotNet.SnippetOptions?
+TantivyDotNet.SearchOptions.Snippets.init -> void
+TantivyDotNet.SearchResults
+TantivyDotNet.SearchResults.Aggregations.get -> System.Text.Json.JsonElement?
+TantivyDotNet.SearchResults.Count.get -> int
+TantivyDotNet.SearchResults.Facets.get -> System.Collections.Generic.IReadOnlyDictionary<string!, System.Collections.Generic.IReadOnlyList<TantivyDotNet.FacetCount!>!>!
+TantivyDotNet.SearchResults.GetAggregations<T>() -> T?
+TantivyDotNet.SearchResults.GetAggregations<T>(System.Text.Json.Serialization.Metadata.JsonTypeInfo<T>! typeInfo) -> T?
+TantivyDotNet.SearchResults.GetEnumerator() -> System.Collections.Generic.IEnumerator<TantivyDotNet.SearchHit!>!
+TantivyDotNet.SearchResults.this[int index].get -> TantivyDotNet.SearchHit!
+TantivyDotNet.SearchResults.TotalCount.get -> long
+TantivyDotNet.SegmentStats
+TantivyDotNet.SegmentStats.<Clone>$() -> TantivyDotNet.SegmentStats!
+TantivyDotNet.SegmentStats.Deconstruct(out string! Id, out long DocumentCount, out long DeletedDocumentCount, out long SizeBytes, out long StoreBytes) -> void
+TantivyDotNet.SegmentStats.DeletedDocumentCount.get -> long
+TantivyDotNet.SegmentStats.DeletedDocumentCount.init -> void
+TantivyDotNet.SegmentStats.DocumentCount.get -> long
+TantivyDotNet.SegmentStats.DocumentCount.init -> void
+TantivyDotNet.SegmentStats.Equals(TantivyDotNet.SegmentStats? other) -> bool
+TantivyDotNet.SegmentStats.Id.get -> string!
+TantivyDotNet.SegmentStats.Id.init -> void
+TantivyDotNet.SegmentStats.SegmentStats(string! Id, long DocumentCount, long DeletedDocumentCount, long SizeBytes, long StoreBytes) -> void
+TantivyDotNet.SegmentStats.SizeBytes.get -> long
+TantivyDotNet.SegmentStats.SizeBytes.init -> void
+TantivyDotNet.SegmentStats.StoreBytes.get -> long
+TantivyDotNet.SegmentStats.StoreBytes.init -> void
+TantivyDotNet.Snippet
+TantivyDotNet.Snippet.Fragment.get -> string!
+TantivyDotNet.Snippet.Highlights.get -> System.Collections.Generic.IReadOnlyList<System.Range>!
+TantivyDotNet.Snippet.IsEmpty.get -> bool
+TantivyDotNet.Snippet.ToHtml(string! open = "<b>", string! close = "</b>") -> string!
+TantivyDotNet.SnippetOptions
+TantivyDotNet.SnippetOptions.Fields.get -> System.Collections.Generic.IReadOnlyList<string!>!
+TantivyDotNet.SnippetOptions.MaxLength.get -> int
+TantivyDotNet.SnippetOptions.MaxLength.init -> void
+TantivyDotNet.SnippetOptions.SnippetOptions(params System.Collections.Generic.IEnumerable<string!>! fields) -> void
+TantivyDotNet.SortBy
+TantivyDotNet.SortBy.Descending.get -> bool
+TantivyDotNet.SortBy.FieldName.get -> string?
+TantivyDotNet.TantivyErrorCode
+TantivyDotNet.TantivyErrorCode.Error = 1 -> TantivyDotNet.TantivyErrorCode
+TantivyDotNet.TantivyErrorCode.IndexAlreadyExists = 4 -> TantivyDotNet.TantivyErrorCode
+TantivyDotNet.TantivyErrorCode.InvalidArgument = 2 -> TantivyDotNet.TantivyErrorCode
+TantivyDotNet.TantivyErrorCode.Io = 5 -> TantivyDotNet.TantivyErrorCode
+TantivyDotNet.TantivyErrorCode.LockBusy = 6 -> TantivyDotNet.TantivyErrorCode
+TantivyDotNet.TantivyErrorCode.Panic = 7 -> TantivyDotNet.TantivyErrorCode
+TantivyDotNet.TantivyErrorCode.QueryParse = 3 -> TantivyDotNet.TantivyErrorCode
+TantivyDotNet.TantivyException
+TantivyDotNet.TantivyException.Code.get -> TantivyDotNet.TantivyErrorCode
+TantivyDotNet.TantivyException.TantivyException(TantivyDotNet.TantivyErrorCode code, string! message) -> void
+TantivyDotNet.TermQuery
+TantivyDotNet.TermQuery.Field.get -> string!
+TantivyDotNet.TermQuery.Value.get -> object!
+TantivyDotNet.TermSetQuery
+TantivyDotNet.TermSetQuery.Field.get -> string!
+TantivyDotNet.TermSetQuery.Values.get -> System.Collections.Generic.IReadOnlyList<object!>!
+[TDN0001]TantivyDotNet.IndexSettings.SortBy.get -> TantivyDotNet.SortBy?
+[TDN0001]TantivyDotNet.IndexSettings.SortBy.init -> void
+TantivyDotNet.TantivyErrorCode.IncompatibleIndex = 8 -> TantivyDotNet.TantivyErrorCode
