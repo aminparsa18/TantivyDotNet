@@ -394,7 +394,7 @@ public sealed class SearchHit
     /// if the document has none), or a <see cref="float"/> for <see cref="SortBy.Score"/>. Empty when
     /// sorted by relevance only.
     /// </summary>
-    public IReadOnlyList<object?> SortValues { get; init; } = NoSortValues;
+    public IReadOnlyList<object?> SortValues { get; internal init; } = NoSortValues;
 
     /// <summary>
     /// An opaque token marking this hit's position in the result order. Pass it as
@@ -407,7 +407,7 @@ public sealed class SearchHit
     /// Snippets keyed by field name, for the fields requested in <see cref="SearchOptions.Snippets"/>;
     /// empty if none were requested.
     /// </summary>
-    public IReadOnlyDictionary<string, Snippet> Snippets { get; init; } = NoSnippets;
+    public IReadOnlyDictionary<string, Snippet> Snippets { get; internal init; } = NoSnippets;
 
     // Where the hit came from, for Searcher.Explain and Cursor. Not part of the public contract.
     internal HitCursor CursorData { get; init; }

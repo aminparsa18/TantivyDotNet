@@ -56,7 +56,7 @@ public class FieldTypeTests
         Assert.Equal("Dark Red", attrs.GetProperty("color").GetString());
         Assert.True(attrs.GetProperty("spec").GetProperty("wifi").GetBoolean());
 
-        Assert.Equal(new FieldDefinition("attrs", FieldType.Json, Stored: true, Indexed: true, Fast: true, "default"), index.Schema["attrs"]);
+        Assert.Equal(new FieldDefinition("attrs", FieldType.Json, stored: true, indexed: true, fast: true, "default"), index.Schema["attrs"]);
     }
 
     private static SearchIndex Hosts()
@@ -91,7 +91,7 @@ public class FieldTypeTests
         var h1 = searcher.Search(Query.Term("id", "h1"))[0].Document;
         Assert.Equal(IPAddress.Parse("192.168.0.1"), h1.GetIpAddress("ip"));
         Assert.Throws<TantivyException>(() => searcher.Search(Query.Term("ip", "10.0.0.5")));
-        Assert.Equal(new FieldDefinition("ip", FieldType.IpAddress, Stored: true, Indexed: true, Fast: true, null), index.Schema["ip"]);
+        Assert.Equal(new FieldDefinition("ip", FieldType.IpAddress, stored: true, indexed: true, fast: true, null), index.Schema["ip"]);
     }
 
     [Fact]

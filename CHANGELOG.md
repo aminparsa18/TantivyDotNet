@@ -4,6 +4,15 @@ All notable changes to TantivyDotNet are listed here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [1.0.0-rc.1] - 2026-11-23
+
+The first release candidate. The public API is frozen: it's listed in `PublicAPI.Shipped.txt`, and 1.0.0 will ship it unchanged unless feedback on this release candidate turns up a problem. Any such change will be listed here.
+
+### Changed
+
+- **Breaking**: `FieldDefinition`, `SegmentStats`, `FieldStats` and `GarbageCollectionResult` no longer have public constructors or `Deconstruct` methods, and their properties are get-only. They're results the library creates, and this lets later 1.x releases add properties to them. Read the properties instead of deconstructing.
+- `SearchHit.Snippets` and `SearchHit.SortValues` no longer have public `init` accessors (they couldn't be used, since `SearchHit` has no public constructor).
+
 ### Added
 
 - `TantivyErrorCode.IncompatibleIndex`: opening an index whose Tantivy format this release can't read throws `TantivyException` with this code and a message naming the formats involved.
@@ -74,7 +83,8 @@ First preview.
 - `SearchOptions` with snippets and highlighting, facet counts, sorting by a fast field, and Elasticsearch-style aggregations.
 - One NuGet package with native libraries for `win-x64`, `linux-x64`, `linux-arm64`, `osx-x64` and `osx-arm64`, trimming- and NativeAOT-compatible.
 
-[Unreleased]: https://github.com/aminparsa18/TantivyDotNet/compare/v0.4.0-preview.1...HEAD
+[Unreleased]: https://github.com/aminparsa18/TantivyDotNet/compare/v1.0.0-rc.1...HEAD
+[1.0.0-rc.1]: https://github.com/aminparsa18/TantivyDotNet/compare/v0.4.0-preview.1...v1.0.0-rc.1
 [0.4.0-preview.1]: https://github.com/aminparsa18/TantivyDotNet/compare/v0.3.0-preview.1...v0.4.0-preview.1
 [0.3.0-preview.1]: https://github.com/aminparsa18/TantivyDotNet/compare/v0.2.0-preview.1...v0.3.0-preview.1
 [0.2.0-preview.1]: https://github.com/aminparsa18/TantivyDotNet/compare/v0.1.0-preview.1...v0.2.0-preview.1

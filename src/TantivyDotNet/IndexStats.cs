@@ -75,22 +75,64 @@ public sealed class IndexStats
 }
 
 /// <summary>Statistics of one segment, in <see cref="IndexStats.Segments"/>.</summary>
-/// <param name="Id">The segment's identifier (a UUID without dashes), which also prefixes its file names.</param>
-/// <param name="DocumentCount">Live (non-deleted) documents.</param>
-/// <param name="DeletedDocumentCount">Deleted documents still stored in the segment.</param>
-/// <param name="SizeBytes">Total size of the segment's files in bytes.</param>
-/// <param name="StoreBytes">Bytes of <see cref="SizeBytes"/> used by stored fields (the doc store).</param>
-public sealed record SegmentStats(string Id, long DocumentCount, long DeletedDocumentCount, long SizeBytes, long StoreBytes);
+public sealed record SegmentStats
+{
+    internal SegmentStats(string id, long documentCount, long deletedDocumentCount, long sizeBytes, long storeBytes)
+    {
+        Id = id;
+        DocumentCount = documentCount;
+        DeletedDocumentCount = deletedDocumentCount;
+        SizeBytes = sizeBytes;
+        StoreBytes = storeBytes;
+    }
+
+    /// <summary>The segment's identifier (a UUID without dashes), which also prefixes its file names.</summary>
+    public string Id { get; }
+
+    /// <summary>Live (non-deleted) documents.</summary>
+    public long DocumentCount { get; }
+
+    /// <summary>Deleted documents still stored in the segment.</summary>
+    public long DeletedDocumentCount { get; }
+
+    /// <summary>Total size of the segment's files in bytes.</summary>
+    public long SizeBytes { get; }
+
+    /// <summary>Bytes of <see cref="SizeBytes"/> used by stored fields (the doc store).</summary>
+    public long StoreBytes { get; }
+}
 
 /// <summary>Bytes used by one field across all segments, in <see cref="IndexStats.Fields"/>. Components the field doesn't have are 0.</summary>
-/// <param name="Name">The field name.</param>
-/// <param name="TermDictionaryBytes">The term dictionary (indexed fields).</param>
-/// <param name="PostingsBytes">Posting lists: which documents contain each term, with frequencies.</param>
-/// <param name="PositionsBytes">Term positions, used by phrase queries (text fields indexed with positions).</param>
-/// <param name="FastFieldBytes">Columnar values of a fast field.</param>
-/// <param name="FieldNormBytes">Field lengths, used for scoring.</param>
-public sealed record FieldStats(string Name, long TermDictionaryBytes, long PostingsBytes, long PositionsBytes, long FastFieldBytes, long FieldNormBytes)
+public sealed record FieldStats
 {
+    internal FieldStats(string name, long termDictionaryBytes, long postingsBytes, long positionsBytes, long fastFieldBytes, long fieldNormBytes)
+    {
+        Name = name;
+        TermDictionaryBytes = termDictionaryBytes;
+        PostingsBytes = postingsBytes;
+        PositionsBytes = positionsBytes;
+        FastFieldBytes = fastFieldBytes;
+        FieldNormBytes = fieldNormBytes;
+    }
+
+    /// <summary>The field name.</summary>
+    public string Name { get; }
+
+    /// <summary>The term dictionary (indexed fields).</summary>
+    public long TermDictionaryBytes { get; }
+
+    /// <summary>Posting lists: which documents contain each term, with frequencies.</summary>
+    public long PostingsBytes { get; }
+
+    /// <summary>Term positions, used by phrase queries (text fields indexed with positions).</summary>
+    public long PositionsBytes { get; }
+
+    /// <summary>Columnar values of a fast field.</summary>
+    public long FastFieldBytes { get; }
+
+    /// <summary>Field lengths, used for scoring.</summary>
+    public long FieldNormBytes { get; }
+
     /// <summary>The sum of all components.</summary>
     public long TotalBytes => TermDictionaryBytes + PostingsBytes + PositionsBytes + FastFieldBytes + FieldNormBytes;
 }

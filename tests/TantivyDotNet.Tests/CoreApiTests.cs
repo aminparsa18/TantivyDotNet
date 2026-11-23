@@ -51,13 +51,13 @@ public class CoreApiTests
 
         Assert.Equal(
             [
-                new FieldDefinition("title", FieldType.Text, Stored: true, Indexed: true, Fast: false, "en_stem"),
-                new FieldDefinition("id", FieldType.Text, Stored: false, Indexed: true, Fast: true, "raw"),
-                new FieldDefinition("delta", FieldType.I64, Stored: false, Indexed: false, Fast: true, null),
-                new FieldDefinition("price", FieldType.F64, Stored: true, Indexed: true, Fast: false, null),
-                new FieldDefinition("active", FieldType.Bool, Stored: false, Indexed: true, Fast: false, null),
-                new FieldDefinition("published", FieldType.Date, Stored: true, Indexed: true, Fast: false, null),
-                new FieldDefinition("blob", FieldType.Bytes, Stored: true, Indexed: false, Fast: false, null),
+                new FieldDefinition("title", FieldType.Text, stored: true, indexed: true, fast: false, "en_stem"),
+                new FieldDefinition("id", FieldType.Text, stored: false, indexed: true, fast: true, "raw"),
+                new FieldDefinition("delta", FieldType.I64, stored: false, indexed: false, fast: true, null),
+                new FieldDefinition("price", FieldType.F64, stored: true, indexed: true, fast: false, null),
+                new FieldDefinition("active", FieldType.Bool, stored: false, indexed: true, fast: false, null),
+                new FieldDefinition("published", FieldType.Date, stored: true, indexed: true, fast: false, null),
+                new FieldDefinition("blob", FieldType.Bytes, stored: true, indexed: false, fast: false, null),
             ],
             index.Schema.Fields);
         Assert.Equal(FieldType.Date, index.Schema["published"].Type);

@@ -46,7 +46,7 @@
 
   <!-- Public API tracking: every public symbol must be listed in PublicAPI.Shipped.txt (released in
        a stable version) or PublicAPI.Unshipped.txt (new since). Adding API without listing it, or
-       removing a shipped one, is a build error (RS0016/RS0017). Until 1.0 everything is Unshipped.
+       removing a shipped one, is a build error (RS0016/RS0017). The 1.0 API was shipped (frozen) at 1.0.0-rc.1.
        The package adds both files as AdditionalFiles itself. -->
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="5.6.0" PrivateAssets="all" />

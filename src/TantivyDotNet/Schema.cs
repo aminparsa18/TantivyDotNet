@@ -30,14 +30,37 @@ public enum FieldType
     Other,
 }
 
-/// <summary>One field of a <see cref="Schema"/>.</summary>
-/// <param name="Name">The field name, as used in documents and queries.</param>
-/// <param name="Type">The value type.</param>
-/// <param name="Stored">Whether the original value is stored and returned in search hits.</param>
-/// <param name="Indexed">Whether the field is searchable.</param>
-/// <param name="Fast">Whether the field has a columnar "fast field" (used for sorting and aggregations).</param>
-/// <param name="Tokenizer">For indexed text and JSON fields, the tokenizer name (for example <c>default</c> or <c>raw</c>); otherwise null.</param>
-public sealed record FieldDefinition(string Name, FieldType Type, bool Stored, bool Indexed, bool Fast, string? Tokenizer);
+/// <summary>One field of a <see cref="Schema"/>. Add fields with <see cref="SchemaBuilder"/>.</summary>
+public sealed record FieldDefinition
+{
+    internal FieldDefinition(string name, FieldType type, bool stored, bool indexed, bool fast, string? tokenizer)
+    {
+        Name = name;
+        Type = type;
+        Stored = stored;
+        Indexed = indexed;
+        Fast = fast;
+        Tokenizer = tokenizer;
+    }
+
+    /// <summary>The field name, as used in documents and queries.</summary>
+    public string Name { get; }
+
+    /// <summary>The value type.</summary>
+    public FieldType Type { get; }
+
+    /// <summary>Whether the original value is stored and returned in search hits.</summary>
+    public bool Stored { get; }
+
+    /// <summary>Whether the field is searchable.</summary>
+    public bool Indexed { get; }
+
+    /// <summary>Whether the field has a columnar "fast field" (used for sorting and aggregations).</summary>
+    public bool Fast { get; }
+
+    /// <summary>For indexed text and JSON fields, the tokenizer name (for example <c>default</c> or <c>raw</c>); otherwise null.</summary>
+    public string? Tokenizer { get; }
+}
 
 /// <summary>
 /// The immutable set of fields in an index. Build one with <see cref="SchemaBuilder"/>, or read
@@ -210,7 +233,7 @@ public sealed class SchemaBuilder
     public SchemaBuilder AddTextField(string name, bool stored = false, bool fast = false, string tokenizer = "default")
     {
         ArgumentException.ThrowIfNullOrEmpty(tokenizer);
-        return Add(new FieldDefinition(name, FieldType.Text, stored, Indexed: true, fast, tokenizer));
+        return Add(new FieldDefinition(name, FieldType.Text, stored, indexed: true, fast, tokenizer));
     }
 
     /// <summary>
@@ -267,7 +290,7 @@ public sealed class SchemaBuilder
     /// <param name="name">Field name.</param>
     /// <param name="stored">Return the paths in search hits.</param>
     public SchemaBuilder AddFacetField(string name, bool stored = false) =>
-        Add(new FieldDefinition(name, FieldType.Facet, stored, Indexed: true, Fast: true, null));
+        Add(new FieldDefinition(name, FieldType.Facet, stored, indexed: true, fast: true, null));
 
     /// <summary>
     /// Adds a JSON field: each document can put any JSON object in it, without declaring the keys.
@@ -282,7 +305,7 @@ public sealed class SchemaBuilder
     public SchemaBuilder AddJsonField(string name, bool stored = false, bool fast = false, string tokenizer = "default")
     {
         ArgumentException.ThrowIfNullOrEmpty(tokenizer);
-        return Add(new FieldDefinition(name, FieldType.Json, stored, Indexed: true, fast, tokenizer));
+        return Add(new FieldDefinition(name, FieldType.Json, stored, indexed: true, fast, tokenizer));
     }
 
     /// <inheritdoc cref="AddU64Field" path="/param"/>

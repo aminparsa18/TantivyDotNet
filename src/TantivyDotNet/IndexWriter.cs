@@ -255,9 +255,20 @@ public sealed unsafe class IndexWriter : IDisposable
 }
 
 /// <summary>The result of <see cref="IndexWriter.GarbageCollectFiles"/>.</summary>
-/// <param name="DeletedFiles">Names of the files deleted, relative to the index directory.</param>
-/// <param name="FailedFiles">
-/// Names of unused files that couldn't be deleted, typically on Windows because a searcher still
-/// maps them. A later collection retries them.
-/// </param>
-public sealed record GarbageCollectionResult(IReadOnlyList<string> DeletedFiles, IReadOnlyList<string> FailedFiles);
+public sealed record GarbageCollectionResult
+{
+    internal GarbageCollectionResult(IReadOnlyList<string> deletedFiles, IReadOnlyList<string> failedFiles)
+    {
+        DeletedFiles = deletedFiles;
+        FailedFiles = failedFiles;
+    }
+
+    /// <summary>Names of the files deleted, relative to the index directory.</summary>
+    public IReadOnlyList<string> DeletedFiles { get; }
+
+    /// <summary>
+    /// Names of unused files that couldn't be deleted, typically on Windows because a searcher still
+    /// maps them. A later collection retries them.
+    /// </summary>
+    public IReadOnlyList<string> FailedFiles { get; }
+}

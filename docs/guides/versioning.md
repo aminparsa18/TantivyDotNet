@@ -6,6 +6,8 @@ TantivyDotNet follows [Semantic Versioning 2.0](https://semver.org). This page d
 
 Versions `0.x.y-preview.N` are previews. A minor version (`0.4` to `0.5`) may contain breaking changes, which the [changelog](../changelog.md) lists. Indexes written by earlier previews keep working unless a release notes otherwise.
 
+Release candidates (`1.0.0-rc.N`) freeze the API: `PublicAPI.Shipped.txt` holds what 1.0.0 will ship. An RC can still change it, but only to fix a problem that feedback turns up, and the changelog marks such a change **Breaking**. 1.0.0 follows once a release candidate has gone a few weeks without API changes.
+
 ## What a major version protects
 
 From 1.0 on, the following change only in a new major version.

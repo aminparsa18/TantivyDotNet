@@ -44,4 +44,4 @@ foreach (var hit in searcher.Search("title:mice"))
 - [Versioning and upgrades](guides/versioning.md)
 - [API reference](api/index.md)
 
-The project is in preview: the API may still change before 1.0. Source, issues and discussions are on [GitHub](https://github.com/aminparsa18/TantivyDotNet).
+The project is at its 1.0 release candidate: the API is frozen, and changes before 1.0.0 are made only to fix problems that RC feedback turns up. Source, issues and discussions are on [GitHub](https://github.com/aminparsa18/TantivyDotNet).

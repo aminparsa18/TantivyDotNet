@@ -110,7 +110,7 @@ public class FacetTests
     public void FacetField_StoredValuesAndSchemaRoundTrip()
     {
         using var index = Library();
-        Assert.Equal(new FieldDefinition("genre", FieldType.Facet, Stored: true, Indexed: true, Fast: true, null), index.Schema["genre"]);
+        Assert.Equal(new FieldDefinition("genre", FieldType.Facet, stored: true, indexed: true, fast: true, null), index.Schema["genre"]);
 
         using var searcher = index.CreateSearcher();
         var d2 = Assert.Single(searcher.Search(Query.Term("id", "d2"))).Document;

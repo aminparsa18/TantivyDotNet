@@ -149,7 +149,7 @@ NuGet caches packages by version, so use a new version for each local package.
 **Releasing.**
 
 1. Move the `[Unreleased]` entries in `CHANGELOG.md` under the new version, with today's date, and update the comparison links at the bottom.
-2. For a stable release, move the lines of `PublicAPI.Unshipped.txt` into `PublicAPI.Shipped.txt`. From 1.0 on, set `PackageValidationBaselineVersion` to the previous release.
+2. For a stable release, or the first release candidate of a major version (which freezes its API), move the lines of `PublicAPI.Unshipped.txt` into `PublicAPI.Shipped.txt`. From 1.0.0 on, set `PackageValidationBaselineVersion` to the previous stable release.
 3. Commit, then tag and push: `git tag -a v1.2.0 -m "TantivyDotNet 1.2.0" && git push origin v1.2.0`. The tag without its `v` becomes the package version.
 4. `publish.yml` runs the whole pipeline for the tag, pushes the package and its symbols to nuget.org with [trusted publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing), and creates the GitHub Release with the native symbols. Tags containing `-` are marked as prereleases.
 5. Add the release's compatibility fixture and commit it:
