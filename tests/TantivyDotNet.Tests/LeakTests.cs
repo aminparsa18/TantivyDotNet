@@ -20,7 +20,19 @@ public class LeakTests
                 GC.WaitForPendingFinalizers();
             }
             using var process = Process.GetCurrentProcess();
-            return new Usage(process.WorkingSet64, IndexFileCount(process), process.Threads.Count);
+            // The thread pool grows and shrinks on its own (more on many-core CI machines), so its
+            // workers aren't counted: a leaked writer or reader leaks threads of its own.
+            return new Usage(process.WorkingSet64, IndexFileCount(process), process.Threads.Count - ThreadPool.ThreadCount);
+        }
+
+        /// <summary>On Linux, the process's thread names with counts (for a failure message).</summary>
+        public static string ThreadNames()
+        {
+            if (!OperatingSystem.IsLinux()) return "";
+            var names = Directory.GetDirectories("/proc/self/task")
+                .Select(t => { try { return File.ReadAllText(Path.Combine(t, "comm")).Trim(); } catch (IOException) { return "?"; } })
+                .GroupBy(n => n).OrderBy(g => g.Key).Select(g => $"{g.Key} x{g.Count()}");
+            return " Threads: " + string.Join(", ", names);
         }
 
         /// <summary>
@@ -50,7 +62,7 @@ public class LeakTests
             return count;
         }
 
-        public override string ToString() => $"{ResidentBytes / 1_048_576.0:F1} MB resident, {IndexFiles} index files open, {Threads} threads";
+        public override string ToString() => $"{ResidentBytes / 1_048_576.0:F1} MB resident, {IndexFiles} index files open, {Threads} threads outside the thread pool";
     }
 
     private static readonly Schema Schema = new SchemaBuilder()
@@ -117,7 +129,7 @@ public class LeakTests
         // Index files are exact (none should stay open); Windows counts every handle, so it gets a margin.
         int fileMargin = OperatingSystem.IsWindows() ? 30 : 1;
         Assert.True(after.IndexFiles - before.IndexFiles < fileMargin, $"index files stayed open over {rounds} rounds: {before} -> {after}");
-        Assert.True(after.Threads - before.Threads < 8, $"threads grew over {rounds} rounds: {before} -> {after}");
+        Assert.True(after.Threads - before.Threads < 8, $"threads grew over {rounds} rounds: {before} -> {after}.{Usage.ThreadNames()}");
     }
 }
 

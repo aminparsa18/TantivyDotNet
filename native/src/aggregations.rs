@@ -73,6 +73,12 @@ fn check_top_hits(name: &str, p: &Map<String, Value>, searcher: &Searcher) -> Ff
             "top_hits aggregation '{name}': size + from must be at most {MAX_TOP_HITS}"
         )));
     }
+    // Tantivy drains the first `from` hits when merging segments, which panics when fewer match.
+    if number("from") > 0 {
+        return Err(FfiError::invalid(format!(
+            "top_hits aggregation '{name}': 'from' isn't supported (Tantivy 0.27 fails when fewer documents match)"
+        )));
+    }
     // Tantivy reads a docvalue field that isn't a column of a segment as a glob, and asserts that
     // the glob matches a column there: so every field must be a column in every segment.
     if let Some(Value::Array(fields)) = p.get("docvalue_fields") {
@@ -190,6 +196,8 @@ mod tests {
         }
         let sub = r#"{"t":{"terms":{"field":"id"},"aggs":{"h":{"top_hits":{"size":20000}}}}}"#;
         assert!(aggs(&f, sub).unwrap_err().contains("size + from"));
+        let from = r#"{"h":{"top_hits":{"size":1,"from":4,"sort":[{"x":"desc"}]}}}"#;
+        assert!(aggs(&f, from).unwrap_err().contains("'from' isn't supported"));
     }
 
     #[test]
