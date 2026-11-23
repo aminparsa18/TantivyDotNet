@@ -14,3 +14,8 @@ PROMPT.md
 # BenchmarkDotNet output
 BenchmarkDotNet.Artifacts/
 coverage/
+
+# docfx output (docs/api/index.md is hand-written; the rest of docs/api is generated)
+docs/_site/
+docs/api/*.yml
+docs/api/.manifest

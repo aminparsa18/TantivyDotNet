@@ -1,0 +1,51 @@
+{
+  "$schema": "https://raw.githubusercontent.com/dotnet/docfx/main/schemas/docfx.schema.json",
+  "metadata": [
+    {
+      "src": [
+        {
+          "src": "../src/TantivyDotNet",
+          "files": ["TantivyDotNet.csproj"]
+        }
+      ],
+      "dest": "api",
+      "properties": {
+        "TargetFramework": "net10.0",
+        "SkipNativeBuild": "true"
+      },
+      "namespaceLayout": "flattened",
+      "memberLayout": "separatePages",
+      "enumSortOrder": "declaringOrder"
+    }
+  ],
+  "build": {
+    "content": [
+      {
+        "files": ["**/*.{md,yml}"],
+        "exclude": ["_site/**", "obj/**"]
+      }
+    ],
+    "output": "_site",
+    "template": ["default", "modern"],
+    "globalMetadata": {
+      "_appName": "TantivyDotNet",
+      "_appTitle": "TantivyDotNet",
+      "_appFooter": "TantivyDotNet is MIT-licensed. Built on <a href=\"https://github.com/quickwit-oss/tantivy\">Tantivy</a>.",
+      "_enableSearch": true,
+      "_disableContribution": false,
+      "_gitContribute": {
+        "repo": "https://github.com/aminparsa18/TantivyDotNet",
+        "branch": "main"
+      },
+      "pdf": false
+    },
+    "sitemap": {
+      "baseUrl": "https://aminparsa18.github.io/TantivyDotNet/"
+    },
+    "markdownEngineProperties": {
+      "alerts": {
+        "TIP": "alert alert-info"
+      }
+    }
+  }
+}

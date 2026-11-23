@@ -6,6 +6,8 @@ An idiomatic .NET binding for [Tantivy](https://github.com/quickwit-oss/tantivy)
 
 What was measured, and how, is under [Performance](#performance).
 
+**Documentation:** [guides and API reference](https://aminparsa18.github.io/TantivyDotNet/), including [schema design](https://aminparsa18.github.io/TantivyDotNet/guides/schema-design.html), [queries](https://aminparsa18.github.io/TantivyDotNet/guides/queries.html), [deployment](https://aminparsa18.github.io/TantivyDotNet/guides/deployment.html) and [migrating from Lucene.NET](https://aminparsa18.github.io/TantivyDotNet/guides/migrating-from-lucene.html).
+
 ## Status
 
 The project is in early development. Schemas (including JSON and IP address fields), custom analyzers, in-memory and on-disk indexes, adding, updating and deleting documents, commit and rollback, query strings and queries built in code, snippets, facets, multi-key sorting with cursor paging, aggregations, score explanations, merge control, index settings, index statistics and shared searchers all work. CI builds a NuGet package for every supported platform and tests it, including from a NativeAOT app. Preview releases are [on nuget.org](https://www.nuget.org/packages/TantivyDotNet); the API may still change before 1.0.
@@ -221,64 +223,23 @@ samples/WikiSearch/         sample web app
 - Complex shapes cross the boundary as JSON: documents, schemas, and a search request (query tree, paging, sort, snippets, facets, aggregations) that is answered in one native call.
 - Every P/Invoke takes only blittable types, and the assembly sets `[DisableRuntimeMarshalling]`, so the calls need no marshalling stubs under NativeAOT.
 
-## Upgrades
+## Upgrades and versioning
 
-An index is a directory in [Tantivy's](https://github.com/quickwit-oss/tantivy) on-disk format. Each TantivyDotNet release is built against one Tantivy version (currently 0.27). That version reads a range of index format versions (currently 4 to 7) and writes the newest. Our own analyzer file (`tantivy-dotnet.json`) has its own version number.
+An index is a directory in Tantivy's on-disk format. A new release opens indexes written by earlier releases, as long as its Tantivy version still reads their format. If a release ever drops a format your index uses, `SearchIndex.Open` throws `TantivyException` with `Code == TantivyErrorCode.IncompatibleIndex`, and the index has to be rebuilt from your data; the changelog calls out any such release. Downgrading isn't supported. Tests open an index written by every released version on each build.
 
-- **Upgrading TantivyDotNet.** A new release opens indexes written by every earlier release whose index format its Tantivy still reads. New segments, from commits and merges, are written in the current format. Old segments are rewritten when they are merged, for example with `ForceMerge`.
-- **Downgrading isn't supported.** Once a newer release has written to an index, older releases may not be able to read it.
-- **When a reindex is needed.** If a Tantivy upgrade drops a format your index still uses, `SearchIndex.Open` (or creating a searcher) throws `TantivyException` with `Code == TantivyErrorCode.IncompatibleIndex`. The message names the format the index uses and the formats this release reads. Rebuild the index from your source data. Running `ForceMerge(1)` with the old release does not help, because it writes the format that release already uses. Release notes call out any release that drops a format. From 1.0 on, dropping read support for indexes written by an earlier 1.x release counts as a breaking change, which means a new major version.
+The project follows Semantic Versioning. From 1.0 on, breaking changes to the public API, the supported platforms or on-disk compatibility only come in a major version. The [versioning policy](https://aminparsa18.github.io/TantivyDotNet/guides/versioning.html) defines what that covers. Changes are listed in the [changelog](https://github.com/aminparsa18/TantivyDotNet/blob/main/CHANGELOG.md).
 
-The compatibility tests (`tests/TantivyDotNet.Tests/Compat`) enforce this. `Compat/Indexes/<version>.zip` holds an index written by each released version: every field type, a custom analyzer, a zstd doc store, three segments and deletes. The tests open each one and check that it gives the same results as an index written by the current code from the same data, and that it accepts writes and merges. After each release, add its fixture:
+## What the package contains
 
-```sh
-dotnet run --project tests/TantivyDotNet.CompatFixture -p:TantivyCompatVersion=<released version>
-```
+Besides the library and its XML documentation, for each supported platform:
 
-To upgrade Tantivy: bump it in `native/Cargo.toml`, and read its changelog for changes to the index format. Run the full test suite, which includes the fixtures of every release. Regenerate `THIRD-PARTY-NOTICES.txt`. If a fixture no longer opens, the new Tantivy dropped that format. Remove the fixture only as part of a release that announces the reindex. Before 1.0 that's a minor version; from 1.0 on, a major one.
+- **Native library** under `runtimes/{rid}/native/`, built in CI.
+- **Symbols.** A `.snupkg` holds the portable PDBs, and [SourceLink](https://github.com/dotnet/sourcelink) points them at the exact commit, so you can step into TantivyDotNet's source while debugging. Native debug symbols are attached to each [GitHub Release](https://github.com/aminparsa18/TantivyDotNet/releases) as `tantivy_dotnet-<version>-<rid>-symbols.zip`.
+- **Third-party notices.** `THIRD-PARTY-NOTICES.txt` lists the license of every Rust crate compiled into the native library.
 
-## Building
+## Contributing
 
-Prerequisites:
-
-- [.NET SDK 11](https://dotnet.microsoft.com/download) (pinned in `global.json`), plus the .NET 10 runtime to run the net10.0 tests
-- [Rust](https://rustup.rs) via rustup, with `cargo` on your `PATH`. The Rust version is pinned in `native/rust-toolchain.toml`, and rustup installs it on first use.
-
-```sh
-dotnet test --solution TantivyDotNet.slnx            # Debug, on net10.0 and net11.0
-dotnet test --solution TantivyDotNet.slnx -c Release # Release (cargo --release, with LTO)
-```
-
-The library project calls `cargo build` before compiling C#. That also regenerates `NativeMethods.g.cs` and copies the native library into the output folder. MSBuild skips the cargo step when no file under `native/` has changed, so incremental builds stay fast. The first Release build takes a few minutes because of LTO.
-
-### Packaging
-
-A local `dotnet pack src/TantivyDotNet -c Release` produces a package with only your machine's native library. CI builds the full package like this:
-
-1. Each RID's library is built on its own runner. Linux uses [cargo-zigbuild](https://github.com/rust-cross/cargo-zigbuild) to target glibc 2.17, and the job fails if a newer glibc symbol slips in.
-2. One job packs the libraries with `-p:SkipNativeBuild=true -p:NativeAssetsDir=<dir with one sub-folder per RID> -p:RequireAllNativeAssets=true`.
-3. On each of the five platforms, the tests and the NativeAOT smoke app are built against the packed `.nupkg` (`-p:TantivyPackageVersion=<version> -p:TantivyPackageSource=<folder>`) and run.
-
-The package is uploaded as a workflow artifact, with its symbol package.
-
-What the package carries besides the code:
-
-- **Symbols.** A `.snupkg` holds the portable PDBs. [SourceLink](https://github.com/dotnet/sourcelink) points them at the exact commit on GitHub, so you can step into TantivyDotNet's source while debugging. The native library is built with line tables. CI splits them off (a `.pdb` on Windows, a `.dSYM` on macOS, a `.debug` file on Linux), so the packed library stays small. Each release attaches them to its [GitHub Release](https://github.com/aminparsa18/TantivyDotNet/releases) as `tantivy_dotnet-<version>-<rid>-symbols.zip` for symbolicating native crash dumps.
-- **Third-party notices.** `THIRD-PARTY-NOTICES.txt` lists the license of every Rust crate compiled into the native library. [cargo-about](https://github.com/EmbarkStudios/cargo-about) generates it from `native/Cargo.lock` (configured in `native/about.toml`), and CI fails if the committed copy is out of date. After changing Rust dependencies, regenerate it with `cd native && cargo about generate --locked --offline about.hbs -o ../THIRD-PARTY-NOTICES.txt` (requires `cargo install cargo-about --features cli`).
-- **Public API tracking.** `src/TantivyDotNet/PublicAPI.Shipped.txt` and `PublicAPI.Unshipped.txt` list every public symbol ([PublicApiAnalyzers](https://github.com/dotnet/roslyn-analyzers/blob/main/src/PublicApiAnalyzers/PublicApiAnalyzers.Help.md)). Adding API without listing it, or removing listed API, fails the build. New API goes into Unshipped. At a stable release, Unshipped moves into Shipped. Package validation (`EnablePackageValidation`) checks the package's target frameworks against each other; from 1.0 on it also checks against the previous release (`PackageValidationBaselineVersion`).
-
-Supply chain checks in CI: [cargo-deny](https://github.com/EmbarkStudios/cargo-deny) (`native/deny.toml`) fails on non-permissive licenses, RustSec advisories, yanked crates and unknown sources. Dependabot (`.github/dependabot.yml`) opens weekly updates for NuGet packages, crates, the .NET SDK and GitHub Actions. Every action is pinned to a commit SHA. The Rust toolchain and the tools installed inside workflows are bumped by hand.
-
-To release, push a version tag (`git tag v0.1.0-preview.1 && git push origin v0.1.0-preview.1`). `publish.yml` runs the whole pipeline above for that tag. It then pushes the tested package and its symbols to nuget.org with [trusted publishing](https://learn.microsoft.com/nuget/nuget-org/trusted-publishing), so no API key is stored, and creates the GitHub Release with the native symbols. The tag without its `v` becomes the package version. After a release, add its compatibility fixture (see [Upgrades](#upgrades)).
-
-To try a local package the same way:
-
-```sh
-dotnet pack src/TantivyDotNet -c Release -o artifacts/packages -p:Version=0.1.0-local.1
-dotnet publish tests/TantivyDotNet.AotSmoke -c Release -r osx-arm64 -o artifacts/aot \
-  -p:TantivyPackageVersion=0.1.0-local.1 -p:TantivyPackageSource=$PWD/artifacts/packages
-./artifacts/aot/TantivyDotNet.AotSmoke
-```
+To build from source you need the .NET 11 SDK and Rust (via rustup); then `dotnet test --solution TantivyDotNet.slnx` builds the native library and runs the tests. [CONTRIBUTING.md](https://github.com/aminparsa18/TantivyDotNet/blob/main/CONTRIBUTING.md) covers the layout, how to add an export, tests, docs and the release process. Report security issues privately as described in [SECURITY.md](https://github.com/aminparsa18/TantivyDotNet/blob/main/SECURITY.md).
 
 ## License
 

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/aminparsa18/TantivyDotNet/security/advisories/new
+    about: Report security vulnerabilities privately, not in a public issue.
+  - name: Documentation
+    url: https://aminparsa18.github.io/TantivyDotNet/
+    about: Guides and the API reference.

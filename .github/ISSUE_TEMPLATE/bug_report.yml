@@ -1,0 +1,63 @@
+name: Bug report
+description: Something doesn't work as documented, crashes, or gives wrong results.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. For security vulnerabilities, please don't open an issue: see [SECURITY.md](https://github.com/aminparsa18/TantivyDotNet/blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. Include the full exception, with its `Code` if it's a `TantivyException`.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Code to reproduce
+      description: The smallest program that shows the problem. An in-memory index (`SearchIndex.CreateInRam`) with a few documents is ideal.
+      render: csharp
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: TantivyDotNet version
+      placeholder: 0.4.0-preview.1
+    validations:
+      required: true
+  - type: input
+    id: dotnet
+    attributes:
+      label: .NET version
+      placeholder: .NET 10.0.1
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - win-x64
+        - linux-x64
+        - linux-arm64
+        - osx-x64
+        - osx-arm64
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: deployment
+    attributes:
+      label: Deployment
+      options:
+        - label: NativeAOT or trimmed app
+        - label: Container
+        - label: Index on disk (not in memory)
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Index size, how often you commit, whether several processes use the index, and so on.

@@ -8,7 +8,7 @@ namespace TantivyDotNet.Tests.Compat;
 /// On-disk compatibility: every released version's fixture (Compat/Indexes/&lt;version&gt;.zip, written
 /// by that version's package from <see cref="CompatCorpus"/>) must open, answer queries exactly like
 /// an index this version writes from the same data, and accept writes and merges.
-/// See README "Upgrades" for the policy and how to add a fixture after a release.
+/// See docs/guides/versioning.md for the policy and CONTRIBUTING.md ("Releasing") for adding a fixture after a release.
 /// </summary>
 public class CompatibilityTests
 {

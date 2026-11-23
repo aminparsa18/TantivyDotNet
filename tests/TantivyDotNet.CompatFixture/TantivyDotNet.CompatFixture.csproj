@@ -3,7 +3,7 @@
   <!--
     Writes the compatibility fixture of a released version: the CompatCorpus index, written by the
     TantivyDotNet package of that version from nuget.org, zipped into the test project. Run it after
-    each release (see README "Upgrades"), with a version that's on nuget.org:
+    each release (see CONTRIBUTING.md, "Releasing"), with a version that's on nuget.org:
 
       dotnet run -\-project tests/TantivyDotNet.CompatFixture -p:TantivyCompatVersion=0.4.0-preview.1
 

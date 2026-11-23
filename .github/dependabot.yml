@@ -4,7 +4,7 @@
 #
 # Not covered: the Rust toolchain (native/rust-toolchain.toml) and the tools pinned inside
 # workflows (cargo-zigbuild, ziglang, cargo-deny, cargo-about, reportgenerator); bump those by hand.
-# Tantivy updates (0.x minor = breaking) need the upgrade checklist in README "Upgrades".
+# Tantivy updates (0.x minor = breaking) need the upgrade checklist in CONTRIBUTING.md (Rust dependencies).
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -26,7 +26,8 @@ updates:
         exclude-patterns: ['tantivy*']
 
   - package-ecosystem: nuget
-    directories: [/src/*, /tests/*, /benchmarks/*, /samples/*]
+    # "/" covers dotnet-tools.json (docfx).
+    directories: [/, /src/*, /tests/*, /benchmarks/*, /samples/*]
     schedule:
       interval: weekly
     groups:

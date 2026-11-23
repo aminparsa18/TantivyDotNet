@@ -105,7 +105,7 @@ public sealed unsafe class IndexWriter : IDisposable
 
     /// <summary>
     /// Replaces the documents containing <paramref name="term"/> with a new document given as JSON:
-    /// deletes them and adds <paramref name="json"/> in one operation, so a commit includes both or
+    /// deletes them and adds the new document in one operation, so a commit includes both or
     /// neither. Typically <paramref name="term"/> is an ID: <c>Query.Term("id", "b42")</c>.
     /// </summary>
     /// <param name="term">An exact term of an indexed field. It isn't analyzed (see <see cref="Query.Term(string, string)"/>).</param>
@@ -117,13 +117,13 @@ public sealed unsafe class IndexWriter : IDisposable
         UpdateDocumentUtf8(term, Ffi.Utf8(json));
     }
 
-    /// <inheritdoc cref="UpdateDocument(TermQuery, string)"/>
-    /// <param name="term">An exact term of an indexed field.</param>
+    /// <inheritdoc cref="UpdateDocument(TermQuery, string)" path="/summary|/exception"/>
+    /// <param name="term">An exact term of an indexed field. It isn't analyzed (see <see cref="Query.Term(string, string)"/>).</param>
     /// <param name="utf8Json">The new document as UTF-8 JSON.</param>
     public void UpdateDocument(TermQuery term, ReadOnlySpan<byte> utf8Json) => UpdateDocumentUtf8(term, utf8Json);
 
-    /// <inheritdoc cref="UpdateDocument(TermQuery, string)"/>
-    /// <param name="term">An exact term of an indexed field.</param>
+    /// <inheritdoc cref="UpdateDocument(TermQuery, string)" path="/summary|/exception"/>
+    /// <param name="term">An exact term of an indexed field. It isn't analyzed (see <see cref="Query.Term(string, string)"/>).</param>
     /// <param name="document">The new document, serialized as in <see cref="AddDocument{T}(T, JsonTypeInfo{T})"/>.</param>
     /// <param name="typeInfo">Source-generated metadata for <typeparamref name="T"/>.</param>
     public void UpdateDocument<T>(TermQuery term, T document, JsonTypeInfo<T> typeInfo)
@@ -133,8 +133,8 @@ public sealed unsafe class IndexWriter : IDisposable
         UpdateDocumentUtf8(term, JsonSerializer.SerializeToUtf8Bytes(document, typeInfo));
     }
 
-    /// <inheritdoc cref="UpdateDocument(TermQuery, string)"/>
-    /// <param name="term">An exact term of an indexed field.</param>
+    /// <inheritdoc cref="UpdateDocument(TermQuery, string)" path="/summary|/exception"/>
+    /// <param name="term">An exact term of an indexed field. It isn't analyzed (see <see cref="Query.Term(string, string)"/>).</param>
     /// <param name="document">The new document, serialized as in <see cref="AddDocument(object)"/>.</param>
     [RequiresUnreferencedCode("Reflection-based JSON serialization. Use UpdateDocument<T>(TermQuery, T, JsonTypeInfo<T>) for trimmed apps.")]
     [RequiresDynamicCode("Reflection-based JSON serialization. Use UpdateDocument<T>(TermQuery, T, JsonTypeInfo<T>) for NativeAOT apps.")]

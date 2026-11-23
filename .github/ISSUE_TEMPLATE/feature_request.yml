@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest an API, a Tantivy feature to expose, or a supported platform.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you're trying to do
+      description: The problem you want to solve, not only the API you have in mind. What do you do today instead?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: How you'd like it to look in C#, if you have an idea. If Tantivy (or Lucene.NET) already has this, link to it.
+      render: csharp
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I'd like to implement this myself (see CONTRIBUTING.md)
