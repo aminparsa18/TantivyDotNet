@@ -17,6 +17,8 @@
 
 mod aggregations;
 mod analyzers;
+mod committing;
+mod directory;
 mod documents;
 mod facets;
 mod ffi;
@@ -168,7 +170,11 @@ pub unsafe extern "C" fn tdn_index_create_in_dir(
         let path = str_arg(path_ptr, path_len, "path")?;
         let (schema, analyzers) = schema_spec::schema_from_json(str_arg(schema_ptr, schema_len, "schema")?)?;
         let settings = settings::from_json(str_arg(settings_ptr, settings_len, "settings")?)?;
-        let created = Index::builder().schema(schema).settings(settings).create_in_dir(path)?;
+        let directory = directory::SafeDirectory::open(std::path::Path::new(path))?;
+        if Index::exists(&directory).map_err(tantivy::TantivyError::from)? {
+            return Err(tantivy::TantivyError::IndexAlreadyExists.into());
+        }
+        let created = Index::create(directory, schema, settings)?;
         if !analyzers.is_empty() {
             analyzers::save(std::path::Path::new(path), &analyzers)?;
         }
@@ -187,7 +193,7 @@ pub unsafe extern "C" fn tdn_index_open_in_dir(
 ) -> i32 {
     guard(err, || {
         let path = str_arg(path_ptr, path_len, "path")?;
-        let opened = Index::open_in_dir(path)?;
+        let opened = Index::open(directory::SafeDirectory::open(std::path::Path::new(path))?)?;
         let analyzers = analyzers::load(std::path::Path::new(path))?;
         let index = TdnIndex::new(opened, analyzers)?;
         write_out(out, Box::into_raw(Box::new(index)), "index")
@@ -369,11 +375,12 @@ pub unsafe extern "C" fn tdn_writer_delete_all(writer: *const TdnWriter, err: *m
     })
 }
 
+/// Commits. On failure the writer is rolled back to the last successful commit (see `committing`).
 #[no_mangle]
 pub unsafe extern "C" fn tdn_writer_commit(writer: *const TdnWriter, err: *mut TdnString) -> i32 {
     guard(err, || {
-        handle(writer, "writer")?.lock()?.commit()?;
-        Ok(())
+        let w = handle(writer, "writer")?;
+        committing::commit(&mut *w.lock()?, &w.merge_policy)
     })
 }
 
@@ -381,8 +388,8 @@ pub unsafe extern "C" fn tdn_writer_commit(writer: *const TdnWriter, err: *mut T
 #[no_mangle]
 pub unsafe extern "C" fn tdn_writer_rollback(writer: *const TdnWriter, err: *mut TdnString) -> i32 {
     guard(err, || {
-        handle(writer, "writer")?.lock()?.rollback()?;
-        Ok(())
+        let w = handle(writer, "writer")?;
+        committing::rollback(&mut *w.lock()?, &w.merge_policy)
     })
 }
 

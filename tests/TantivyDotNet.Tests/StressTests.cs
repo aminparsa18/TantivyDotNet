@@ -70,10 +70,11 @@ public class StressTests
     [Fact]
     public void Searches_during_commits_merges_deletes_and_garbage_collection()
     {
-        // On Windows, Commit fails with "Access is denied" writing a new segment file while another
-        // SearchIndex on the directory reopens it during merges and garbage collection, and a
-        // snapshot once had a count no commit had. Not yet understood: see step 9.5 of the plan.
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "Known Windows failure under investigation (step 9.5).");
+        // This found two bugs (step 9.5): on Windows, Commit failed with "Access is denied" while
+        // readers had meta.json open (directory.rs), and a merge then published part of the
+        // failed commit, a count no commit had (committing.rs).
+        // TDN_STRESS_OFF=reopen,gc,merge,fresh,managed turns parts off, to narrow down a failure.
+        var off = (Environment.GetEnvironmentVariable("TDN_STRESS_OFF") ?? "").Split(',', StringSplitOptions.TrimEntries);
         using var dir = new TempDirectory();
         using var index = SearchIndex.Create(dir.Path, Schema());
         var committedCounts = new ConcurrentDictionary<long, bool> { [0] = true };
@@ -109,8 +110,8 @@ public class StressTests
                 // Announce the count before it becomes visible.
                 committedCounts[live.Count] = true;
                 writer.Commit();
-                if (round % 15 == 7) writer.ForceMerge(2);
-                if (round % 10 == 3) writer.GarbageCollectFiles();
+                if (round % 15 == 7 && !off.Contains("merge")) writer.ForceMerge(2);
+                if (round % 10 == 3 && !off.Contains("gc")) writer.GarbageCollectFiles();
             }
         }
 
@@ -148,12 +149,68 @@ public class StressTests
             }
         }
 
-        RunFor(Duration, Writer, FreshSearchers, FreshSearchers, FreshSearchers, Managed, Managed, Reopen);
-        Assert.True(snapshots > 0);
+        var workers = new List<Action<CancellationToken>> { Writer };
+        if (!off.Contains("fresh")) workers.AddRange([FreshSearchers, FreshSearchers, FreshSearchers]);
+        if (!off.Contains("managed")) workers.AddRange([Managed, Managed]);
+        if (!off.Contains("reopen")) workers.Add(Reopen);
+        RunFor(Duration, [.. workers]);
+        Assert.True(snapshots > 0 || workers.Count == 1);
 
         // After the writer is gone, the last commit is what everyone sees.
         using var final = index.CreateSearcher();
         CheckSnapshot(final, committedCounts);
+    }
+
+    /// <summary>
+    /// The smallest version of the test above: commits on disk while other threads read meta.json
+    /// (a fresh searcher reloads it; opening the directory again also reads .managed.json).
+    /// No merges, no garbage collection.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Commits_on_disk_while_readers_reload(bool reopenDirectory)
+    {
+        using var dir = new TempDirectory();
+        using var index = SearchIndex.Create(dir.Path, Schema());
+        long commits = 0;
+
+        void Writer(CancellationToken stop)
+        {
+            using var writer = index.CreateWriter(new IndexWriterOptions
+            {
+                HeapBytes = 15_000_000,
+                ThreadCount = 1,
+                MergePolicy = MergePolicy.None,
+            });
+            for (ulong id = 0; !stop.IsCancellationRequested; id++)
+            {
+                writer.AddDocument(Doc(id));
+                writer.Commit();
+                Interlocked.Increment(ref commits);
+            }
+        }
+
+        void Reader(CancellationToken stop)
+        {
+            while (!stop.IsCancellationRequested)
+            {
+                if (reopenDirectory)
+                {
+                    using var other = SearchIndex.Open(dir.Path);
+                    using var s = other.CreateSearcher();
+                    _ = s.DocumentCount;
+                }
+                else
+                {
+                    using var s = index.CreateSearcher();
+                    _ = s.DocumentCount;
+                }
+            }
+        }
+
+        RunFor(Duration, Writer, Reader, Reader, Reader);
+        Assert.True(commits > 0);
     }
 
     [Fact]

@@ -70,6 +70,50 @@ impl Fixture {
     }
 }
 
+/// A RAM directory whose `meta.json` writes fail while `fail_meta` is set, like a commit hitting
+/// an IO error (on Windows: "Access is denied" replacing a file another handle has open).
+#[derive(Clone, Debug, Default)]
+pub struct FailingDirectory {
+    inner: tantivy::directory::RamDirectory,
+    pub fail_meta: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl tantivy::Directory for FailingDirectory {
+    fn get_file_handle(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<std::sync::Arc<dyn tantivy::directory::FileHandle>, tantivy::directory::error::OpenReadError> {
+        self.inner.get_file_handle(path)
+    }
+    fn delete(&self, path: &std::path::Path) -> Result<(), tantivy::directory::error::DeleteError> {
+        self.inner.delete(path)
+    }
+    fn exists(&self, path: &std::path::Path) -> Result<bool, tantivy::directory::error::OpenReadError> {
+        self.inner.exists(path)
+    }
+    fn open_write(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<tantivy::directory::WritePtr, tantivy::directory::error::OpenWriteError> {
+        self.inner.open_write(path)
+    }
+    fn atomic_read(&self, path: &std::path::Path) -> Result<Vec<u8>, tantivy::directory::error::OpenReadError> {
+        self.inner.atomic_read(path)
+    }
+    fn atomic_write(&self, path: &std::path::Path, data: &[u8]) -> std::io::Result<()> {
+        if path == std::path::Path::new("meta.json") && self.fail_meta.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "Access is denied (test)"));
+        }
+        self.inner.atomic_write(path, data)
+    }
+    fn sync_directory(&self) -> std::io::Result<()> {
+        self.inner.sync_directory()
+    }
+    fn watch(&self, callback: tantivy::directory::WatchCallback) -> tantivy::Result<tantivy::directory::WatchHandle> {
+        self.inner.watch(callback)
+    }
+}
+
 /// A term query JSON with a tagged value, e.g. `term("year", r#"{"u64":1937}"#)`.
 pub fn term(field: &str, tagged_value: &str) -> String {
     format!(r#"{{"type":"term","field":"{field}","value":{tagged_value}}}"#)

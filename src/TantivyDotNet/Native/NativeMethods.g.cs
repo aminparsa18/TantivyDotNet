@@ -110,6 +110,9 @@ namespace TantivyDotNet.Native
         [DllImport(__DllName, EntryPoint = "tdn_writer_delete_all", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int tdn_writer_delete_all(TdnWriter* writer, TdnString* err);
 
+        /// <summary>
+        ///  Commits. On failure the writer is rolled back to the last successful commit (see `committing`).
+        /// </summary>
         [DllImport(__DllName, EntryPoint = "tdn_writer_commit", CallingConvention = CallingConvention.Cdecl, ExactSpelling = true)]
         internal static extern int tdn_writer_commit(TdnWriter* writer, TdnString* err);
 

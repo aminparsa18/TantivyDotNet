@@ -166,14 +166,27 @@ public class EdgeCaseTests
                 Assert.Equal(2, searcher.Count("mice"));
             // ...writing fails cleanly. The writer itself opens (its lock file already exists and is
             // writable), but committing new segment files can't.
+            Assert.Equal(TantivyErrorCode.Io, ErrorOf(() => SearchIndex.Create(readOnly, Books.Schema())));
             using (var writer = index.CreateWriter())
             {
                 writer.AddDocument(Books.Json[0]);
-                Assert.Equal(TantivyErrorCode.Io, ErrorOf(writer.Commit));
+                var error = Assert.Throws<TantivyException>(writer.Commit);
+                Assert.Equal(TantivyErrorCode.Io, error.Code);
+                Assert.Contains("rolled back", error.Message);
+                using (var searcher = index.CreateSearcher())
+                    Assert.Equal(Books.Json.Length, searcher.DocumentCount);
+
+                // The failed commit rolled the writer back: once the directory is writable again,
+                // committing publishes nothing from before the failure, and the writer still works.
+                File.SetUnixFileMode(dir.Path, mode);
+                writer.Commit();
+                using (var searcher = index.CreateSearcher())
+                    Assert.Equal(Books.Json.Length, searcher.DocumentCount);
+                writer.AddDocument(Books.Json[1]);
+                writer.Commit();
+                using (var searcher = index.CreateSearcher())
+                    Assert.Equal(Books.Json.Length + 1, searcher.DocumentCount);
             }
-            using (var searcher = index.CreateSearcher())
-                Assert.Equal(Books.Json.Length, searcher.DocumentCount);
-            Assert.Equal(TantivyErrorCode.Io, ErrorOf(() => SearchIndex.Create(readOnly, Books.Schema())));
         }
         finally
         {

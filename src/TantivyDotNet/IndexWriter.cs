@@ -153,6 +153,13 @@ public sealed unsafe class IndexWriter : IDisposable
     public void DeleteAllDocuments() => Run(&NativeMethods.tdn_writer_delete_all);
 
     /// <summary>Makes all changes since the last commit durable and visible to new searchers.</summary>
+    /// <remarks>
+    /// A commit is all or nothing. If it fails (for example with an IO error), it throws and the
+    /// writer is rolled back as if <see cref="Rollback"/> had been called: the changes since the
+    /// last successful commit are discarded, and the writer can be used again. Add them again
+    /// to retry.
+    /// </remarks>
+    /// <exception cref="TantivyException">The commit failed; the writer was rolled back.</exception>
     public void Commit() => Run(&NativeMethods.tdn_writer_commit);
 
     /// <summary>Discards all changes since the last commit.</summary>
