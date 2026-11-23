@@ -76,7 +76,10 @@ jobs:
 
       - name: Rust coverage
         working-directory: native
-        run: cargo llvm-cov --all-features --locked --cobertura --output-path ../coverage/rust.cobertura.xml
+        # cargo llvm-cov doesn't create the output directory.
+        run: |
+          mkdir -p ../coverage
+          cargo llvm-cov --all-features --locked --cobertura --output-path ../coverage/rust.cobertura.xml
 
       # Builds the native library from source (Debug) and runs the whole suite against the project.
       - name: .NET coverage
