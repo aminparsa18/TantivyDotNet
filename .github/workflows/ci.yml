@@ -49,6 +49,54 @@ jobs:
       - name: Unit tests
         run: cargo test --all-features --locked
 
+  # 0b. Code coverage of the .NET library (its test suite) and the Rust crate (its unit tests),
+  #     reported in the job summary and as an HTML artifact. Not a gate.
+  coverage:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native
+          key: coverage
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+          global-json-file: global.json
+
+      - name: Rust coverage
+        working-directory: native
+        run: cargo llvm-cov --all-features --locked --cobertura --output-path ../coverage/rust.cobertura.xml
+
+      # Builds the native library from source (Debug) and runs the whole suite against the project.
+      - name: .NET coverage
+        run: >
+          dotnet test --project tests/TantivyDotNet.Tests -f net10.0 --
+          --coverage --coverage-output-format cobertura --coverage-output dotnet.cobertura.xml
+          --coverage-settings "$PWD/tests/coverage.xml" --results-directory "$PWD/coverage"
+
+      - name: Report
+        run: |
+          dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.6.1
+          reportgenerator -reports:"coverage/*.cobertura.xml" -targetdir:coverage/report \
+            -reporttypes:"Html;MarkdownSummaryGithub" -title:TantivyDotNet
+          cat coverage/report/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: coverage
+          path: coverage/report/
+
   # 1. Build the Rust cdylib once per RID.
   native:
     name: native (${{ matrix.rid }})

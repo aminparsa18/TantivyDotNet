@@ -13,3 +13,4 @@ PROMPT.md
 
 # BenchmarkDotNet output
 BenchmarkDotNet.Artifacts/
+coverage/

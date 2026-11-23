@@ -311,6 +311,9 @@ public sealed class SchemaBuilder
     private SchemaBuilder Add(FieldDefinition field)
     {
         ArgumentException.ThrowIfNullOrEmpty(field.Name, "name");
+        // Tantivy rejects these (a leading '-' would read as a negation in the query parser).
+        if (field.Name.StartsWith('-'))
+            throw new ArgumentException($"Field name '{field.Name}' can't start with '-'.", "name");
         if (_fields.Any(f => f.Name == field.Name))
             throw new ArgumentException($"A field named '{field.Name}' was already added.", "name");
         _fields.Add(field);
