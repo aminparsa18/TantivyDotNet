@@ -328,7 +328,10 @@ fn parse_cursor(after: &SearchAfter, keys: &[Key]) -> FfiResult<Cursor> {
                 (Source::Field { kind: Kind::I64, .. }, "i64") => inner.as_i64().map(KeyValue::I64),
                 (Source::Field { kind: Kind::F64, .. }, "f64") => inner.as_f64().map(KeyValue::F64),
                 (Source::Field { kind: Kind::Bool, .. }, "bool") => inner.as_bool().map(KeyValue::Bool),
-                (Source::Field { kind: Kind::Date, .. }, "date") => inner.as_i64().map(KeyValue::Date),
+                (Source::Field { kind: Kind::Date, .. }, "date") => inner
+                    .as_i64()
+                    .filter(|us| (crate::query_spec::MIN_DATE_MICROS..=crate::query_spec::MAX_DATE_MICROS).contains(us))
+                    .map(KeyValue::Date),
                 (Source::Field { kind: Kind::Str, .. }, "str") => inner.as_str().map(|s| KeyValue::Str(s.to_owned())),
                 (Source::Field { kind: Kind::Ip, .. }, "ip") => inner.as_str().and_then(parse_ip).map(KeyValue::Ip),
                 (Source::Field { kind: Kind::Bytes, .. }, "bytes") => inner
@@ -1131,6 +1134,10 @@ mod tests {
         invalid(&after(&n, r#"[{"i64":"1"}]"#), "doesn't match the sort order");
         invalid(&after(&n, r#"[{"i64":1,"u64":1}]"#), "doesn't match the sort order");
         invalid(&after(&n, r#"[1]"#), "doesn't match the sort order");
+        invalid(
+            &after(&sort_json(&[("d", false)]), &format!(r#"[{{"date":{}}}]"#, i64::MAX)),
+            "doesn't match the sort order",
+        );
         invalid(&after(&s, r#"[{"str":1}]"#), "doesn't match the sort order");
         invalid(&after(&y, r#"[{"bytes":[256]}]"#), "doesn't match the sort order");
         invalid(&after(&sort_json(&[("ip", false)]), r#"[{"ip":"nope"}]"#), "doesn't match the sort order");

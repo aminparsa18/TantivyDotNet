@@ -108,7 +108,7 @@ pub fn run(searcher: &Searcher, index: &Index, request_json: &str) -> FfiResult<
             None => Vec::new(),
         };
         let agg_handle = match &request.aggregations {
-            Some(a) => Some(aggregations::add(a, index, &mut collectors)?),
+            Some(a) => Some(aggregations::add(a, searcher, index, &mut collectors)?),
             None => None,
         };
         let mut fruits = searcher.search(&query, &collectors)?;

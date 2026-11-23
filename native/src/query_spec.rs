@@ -22,6 +22,7 @@ use tantivy::query::{
     AllQuery, BooleanQuery, BoostQuery, ConstScoreQuery, DisjunctionMaxQuery, EmptyQuery, ExistsQuery, FuzzyTermQuery,
     MoreLikeThisQuery, Occur, PhraseQuery, Query, QueryParser, RangeQuery, RegexQuery, TermQuery, TermSetQuery,
 };
+use tantivy::query_grammar::{self, UserInputAst, UserInputBound, UserInputLeaf};
 use tantivy::schema::{Field, FieldType, IndexRecordOption, OwnedValue, Schema};
 use tantivy::{DateTime, Index, Term};
 
@@ -240,7 +241,13 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
             if lower.is_none() && upper.is_none() {
                 return Err(FfiError::invalid("a range query needs at least one bound"));
             }
-            let (lower_value, upper_value) = (lower.as_ref().map(|b| &b.value), upper.as_ref().map(|b| &b.value));
+            // A date bound outside Tantivy's range is moved to its edge: nothing lies beyond it.
+            let clamp = |b: &BoundSpec| match b.value {
+                ValueSpec::Date(us) => ValueSpec::Date(us.clamp(MIN_DATE_MICROS, MAX_DATE_MICROS)),
+                ref other => other.clone(),
+            };
+            let (lower_value, upper_value) = (lower.as_ref().map(clamp), upper.as_ref().map(clamp));
+            let (lower_value, upper_value) = (lower_value.as_ref(), upper_value.as_ref());
             let terms = match ft {
                 FieldType::JsonObject(o) => {
                     if path.is_empty() {
@@ -385,10 +392,24 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
                 }
                 parser.set_field_fuzzy(field, f.prefix, f.distance, f.transpositions);
             }
+            let parse_error =
+                |e: tantivy::query::QueryParserError| FfiError::new(ffi::status::QUERY_PARSE, e.to_string());
+            // Normally straight from the text; through the grammar's AST only when a range needs fixing.
             if *lenient {
-                parser.parse_query_lenient(text).0
+                let (mut ast, _) = query_grammar::parse_query_lenient(text);
+                if unify_parsed_ranges(&mut ast) {
+                    parser.build_query_from_user_input_ast_lenient(ast).0
+                } else {
+                    parser.parse_query_lenient(text).0
+                }
             } else {
-                parser.parse_query(text).map_err(|e| FfiError::new(ffi::status::QUERY_PARSE, e.to_string()))?
+                let fixed = query_grammar::parse_query(text)
+                    .ok()
+                    .and_then(|mut ast| unify_parsed_ranges(&mut ast).then_some(ast));
+                match fixed {
+                    Some(ast) => parser.build_query_from_user_input_ast(ast).map_err(parse_error)?,
+                    None => parser.parse_query(text).map_err(parse_error)?,
+                }
             }
         }
     })
@@ -479,7 +500,7 @@ impl Target<'_> {
                     (ValueSpec::Str(s), _) => term.append_type_and_str(s),
                     (ValueSpec::Bool(b), _) => term.append_type_and_fast_value(*b),
                     (ValueSpec::Date(us), _) => term.append_type_and_fast_value(
-                        DateTime::from_timestamp_micros(*us).truncate(tantivy::schema::DATE_TIME_PRECISION_INDEXED),
+                        date_from_micros(*us)?.truncate(tantivy::schema::DATE_TIME_PRECISION_INDEXED),
                     ),
                     (other, _) => {
                         return Err(FfiError::invalid(format!(
@@ -499,6 +520,65 @@ impl Target<'_> {
             Target::Json { .. } => IndexRecordOption::WithFreqs,
         }
     }
+}
+
+/// Tantivy's query parser types each bound of a range by what its text looks like (i64, u64 or
+/// f64, with `9.0` read as an integer), and a range on a JSON field whose bounds get different
+/// types (`attrs.n:[0 TO 9.5]`) panics when it runs (see [`unify_json_bounds`] for our own range
+/// queries). Such a range is split into its two halves (`>=0 AND <=9.5`): each has one type, and
+/// the conjunction matches the same documents on any field. Returns whether anything changed.
+fn unify_parsed_ranges(ast: &mut UserInputAst) -> bool {
+    fn number(b: &UserInputBound) -> Option<bool> {
+        // Some(fits i64) for a numeric bound.
+        match b {
+            UserInputBound::Inclusive(t) | UserInputBound::Exclusive(t) => {
+                if t.parse::<i64>().is_ok() {
+                    Some(true)
+                } else {
+                    t.parse::<f64>().is_ok_and(f64::is_finite).then_some(false)
+                }
+            }
+            UserInputBound::Unbounded => None,
+        }
+    }
+    match ast {
+        UserInputAst::Clause(clauses) => {
+            clauses.iter_mut().fold(false, |changed, (_, c)| unify_parsed_ranges(c) | changed)
+        }
+        UserInputAst::Boost(inner, _) => unify_parsed_ranges(inner),
+        UserInputAst::Leaf(leaf) => {
+            let UserInputLeaf::Range { field, lower, upper } = leaf.as_ref() else { return false };
+            match (number(lower), number(upper)) {
+                (Some(a), Some(b)) if !(a && b) => {
+                    let half = |lower: UserInputBound, upper: UserInputBound| {
+                        let leaf = UserInputLeaf::Range { field: field.clone(), lower, upper };
+                        (Some(query_grammar::Occur::Must), UserInputAst::Leaf(Box::new(leaf)))
+                    };
+                    let halves = vec![
+                        half(lower.clone(), UserInputBound::Unbounded),
+                        half(UserInputBound::Unbounded, upper.clone()),
+                    ];
+                    *ast = UserInputAst::Clause(halves);
+                    true
+                }
+                _ => false,
+            }
+        }
+    }
+}
+
+/// Tantivy keeps dates as i64 nanoseconds since 1970: 1677-09-21 to 2262-04-11 (UTC). Out of that
+/// range, converting microseconds overflows (and silently wraps in release builds).
+pub const MIN_DATE_MICROS: i64 = i64::MIN / 1000;
+pub const MAX_DATE_MICROS: i64 = i64::MAX / 1000;
+
+pub fn date_from_micros(us: i64) -> FfiResult<DateTime> {
+    if !(MIN_DATE_MICROS..=MAX_DATE_MICROS).contains(&us) {
+        return Err(FfiError::invalid(
+            "dates must be between 1677-09-21 and 2262-04-11 (UTC): Tantivy stores them as 64-bit nanoseconds",
+        ));
+    }
+    Ok(DateTime::from_timestamp_micros(us))
 }
 
 fn number_of(value: &ValueSpec) -> Option<NumericalValue> {
@@ -561,9 +641,7 @@ fn make_term(field: Field, name: &str, ft: &FieldType, value: &ValueSpec) -> Ffi
         (FieldType::F64(_), V::I64(n)) => Term::from_field_f64(field, *n as f64),
         (FieldType::F64(_), V::U64(n)) => Term::from_field_f64(field, *n as f64),
         (FieldType::Bool(_), V::Bool(b)) => Term::from_field_bool(field, *b),
-        (FieldType::Date(_), V::Date(us)) => {
-            Term::from_field_date_for_search(field, DateTime::from_timestamp_micros(*us))
-        }
+        (FieldType::Date(_), V::Date(us)) => Term::from_field_date_for_search(field, date_from_micros(*us)?),
         (FieldType::Bytes(_), V::Bytes(b)) => Term::from_field_bytes(field, b),
         (FieldType::IpAddr(_), V::Ip(s)) => {
             let ip: std::net::IpAddr =
@@ -756,6 +834,44 @@ mod tests {
         assert_eq!(f.count(&strings), 1);
         let whole = r#"{"type":"range","field":"j","lower":{"value":{"i64":0},"inclusive":true},"upper":null}"#;
         assert_invalid(&f, whole, "query a path inside it");
+    }
+
+    #[test]
+    fn parsed_ranges_on_json_fields_with_mixed_number_bounds() {
+        // Tantivy's parser types the bounds separately, and the range then panics.
+        let f = Fixture::new(
+            r#"{"fields":[{"name":"j","type":"json","fast":true},{"name":"x","type":"f64","fast":true}]}"#,
+            &[&[r#"{"j":{"n":5},"x":5}"#, r#"{"j":{"n":7.5},"x":7.5}"#, r#"{"j":{"n":-2},"x":-2}"#]],
+        );
+        let parse = |text: &str, lenient: bool| {
+            f.try_count(&format!(r#"{{"type":"parse","text":"{text}","lenient":{lenient}}}"#))
+        };
+        for lenient in [false, true] {
+            assert_eq!(parse("j.n:[0 TO 9.5]", lenient).unwrap(), 2);
+            assert_eq!(parse("j.n:[-2.5 TO 6]", lenient).unwrap(), 2);
+            assert_eq!(parse("j.n:{-2 TO 18446744073709551615]", lenient).unwrap(), 2);
+            assert_eq!(parse("x:[0 TO 9.5] AND (j.n:[0 TO 5.5] OR j.n:[7 TO 7.9])^2", lenient).unwrap(), 2);
+            assert_eq!(parse("j.n:[1 TO 9]", lenient).unwrap(), 2); // 5 and 7.5
+        }
+        assert_eq!(parse("j.n:[a TO 9.5]", false).unwrap(), 0);
+        assert_eq!(parse("j.n:(", false).unwrap_err().code, crate::ffi::status::QUERY_PARSE);
+    }
+
+    #[test]
+    fn dates_outside_tantivys_range() {
+        let f = books();
+        // Year 1600 and year 2300 in microseconds.
+        let (early, late) = (-11_676_096_000_000_000i64, 10_413_792_000_000_000i64);
+        assert_invalid(&f, &term("when", &format!(r#"{{"date":{early}}}"#)), "between 1677-09-21 and 2262-04-11");
+        assert_invalid(&f, &term("attrs.d", &format!(r#"{{"date":{late}}}"#)), "between 1677-09-21 and 2262-04-11");
+        // Range bounds are clamped instead: nothing is stored beyond them.
+        let range = format!(
+            r#"{{"type":"range","field":"when","lower":{{"value":{{"date":{early}}},"inclusive":true}},"upper":{{"value":{{"date":{late}}},"inclusive":true}}}}"#
+        );
+        assert_eq!(f.count(&range), 1);
+        let extreme =
+            range.replace(&early.to_string(), &i64::MIN.to_string()).replace(&late.to_string(), &i64::MAX.to_string());
+        assert_eq!(f.count(&extreme), 1);
     }
 
     #[test]
