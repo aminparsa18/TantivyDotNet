@@ -4,6 +4,8 @@ All notable changes to TantivyDotNet are listed here. The format follows [Keep a
 
 ## [Unreleased]
 
+## [1.0.0-rc.2] - 2026-11-24
+
 ### Changed
 
 - Query text that nests parentheses or `NOT` more than 32 levels deep is no longer parsed. With `QueryParserOptions.Lenient`, it matches nothing; otherwise it throws `QueryParseException`. Queries built in code (`Query.Boolean` and the other factories) aren't affected.
@@ -91,7 +93,8 @@ First preview.
 - `SearchOptions` with snippets and highlighting, facet counts, sorting by a fast field, and Elasticsearch-style aggregations.
 - One NuGet package with native libraries for `win-x64`, `linux-x64`, `linux-arm64`, `osx-x64` and `osx-arm64`, trimming- and NativeAOT-compatible.
 
-[Unreleased]: https://github.com/aminparsa18/TantivyDotNet/compare/v1.0.0-rc.1...HEAD
+[Unreleased]: https://github.com/aminparsa18/TantivyDotNet/compare/v1.0.0-rc.2...HEAD
+[1.0.0-rc.2]: https://github.com/aminparsa18/TantivyDotNet/compare/v1.0.0-rc.1...v1.0.0-rc.2
 [1.0.0-rc.1]: https://github.com/aminparsa18/TantivyDotNet/compare/v0.4.0-preview.1...v1.0.0-rc.1
 [0.4.0-preview.1]: https://github.com/aminparsa18/TantivyDotNet/compare/v0.3.0-preview.1...v0.4.0-preview.1
 [0.3.0-preview.1]: https://github.com/aminparsa18/TantivyDotNet/compare/v0.2.0-preview.1...v0.3.0-preview.1
