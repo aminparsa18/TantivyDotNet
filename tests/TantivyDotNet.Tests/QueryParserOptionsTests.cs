@@ -52,6 +52,33 @@ public class QueryParserOptionsTests
     }
 
     [Fact]
+    public void Deeply_nested_query_text_is_refused_not_parsed()
+    {
+        // Parsing nests once per level; unbounded, a few hundred levels exhaust the native stack.
+        using var index = Books.InRam();
+        using var searcher = index.CreateSearcher();
+        var lenient = new QueryParserOptions { Lenient = true };
+        foreach (int depth in new[] { 33, 1_000, 100_000 })
+        {
+            foreach (string text in new[]
+            {
+                new string('(', depth) + "title:mice" + new string(')', depth),
+                new string('(', depth) + "mice",
+                string.Concat(Enumerable.Repeat("NOT ", depth)) + "mice",
+            })
+            {
+                Assert.Empty(searcher.Search(Query.Parse(text, lenient)));
+                var e = Assert.Throws<QueryParseException>(() => searcher.Search(text));
+                Assert.Contains("levels deep", e.Message);
+            }
+        }
+        // Up to the limit, nesting still parses.
+        string deepest = new string('(', 32) + "title:mice" + new string(')', 32);
+        Assert.Equal(["b1"], Books.Ids(searcher.Search(Query.Parse(deepest))));
+        Assert.Equal(["b1"], Books.Ids(searcher.Search(Query.Parse(deepest, lenient))));
+    }
+
+    [Fact]
     public void InvalidOptions_Throw()
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => new FuzzyOptions(distance: 3));

@@ -128,6 +128,10 @@ public sealed class QueryParserOptions
     /// parentheses, unknown fields, bad ranges) instead of throwing <see cref="QueryParseException"/>.
     /// Use it for text typed by end users. Default false.
     /// </summary>
+    /// <remarks>
+    /// Text that nests parentheses or <c>NOT</c> more than 32 levels deep isn't parsed at all: it
+    /// matches nothing when lenient, and throws <see cref="QueryParseException"/> otherwise.
+    /// </remarks>
     public bool Lenient { get; init; }
 
     internal void WriteJson(System.Text.Json.Utf8JsonWriter w)

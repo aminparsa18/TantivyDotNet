@@ -161,6 +161,69 @@ fn default_true() -> bool {
 /// Fuzzy distances Tantivy builds Levenshtein automata for.
 const MAX_FUZZY_DISTANCE: u8 = 2;
 
+/// Deepest nesting accepted in query text (see [`nesting_depth`]). Tantivy's query grammar recurses
+/// once per level and has no limit of its own; a stack overflow aborts the process, which no
+/// `catch_unwind` can stop. Hundreds of levels overflow a 1 MiB thread stack, so this keeps a wide
+/// margin while staying far beyond anything a person types.
+const MAX_QUERY_NESTING: usize = 32;
+
+/// How deep Tantivy's query grammar would recurse for `text`: open parentheses (bare or after
+/// `field:`), plus chained `NOT` keywords, each of which nests the leaf that follows it. Quoted
+/// phrases and backslash-escaped characters don't nest. Anything else that looks like nesting (a
+/// parenthesis inside a range or regex) only makes the count higher, never lower.
+fn nesting_depth(text: &str) -> usize {
+    // For each open parenthesis, the NOTs that were pending when it opened (they stay open inside).
+    let mut groups: Vec<usize> = Vec::new();
+    let (mut open, mut nots, mut max) = (0usize, 0usize, 0usize);
+    let mut prev = ' ';
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                chars.next();
+                nots = 0;
+            }
+            '"' => {
+                while let Some(c) = chars.next() {
+                    match c {
+                        '\\' => {
+                            chars.next();
+                        }
+                        '"' => break,
+                        _ => {}
+                    }
+                }
+                nots = 0;
+            }
+            '(' => {
+                groups.push(nots);
+                open += nots + 1;
+                nots = 0;
+            }
+            ')' => {
+                if let Some(n) = groups.pop() {
+                    open -= n + 1;
+                }
+                nots = 0;
+            }
+            'N' if (prev.is_whitespace() || matches!(prev, '(' | '+' | '-')) && {
+                let mut ahead = chars.clone();
+                ahead.next() == Some('O') && ahead.next() == Some('T') && ahead.next().is_some_and(char::is_whitespace)
+            } =>
+            {
+                chars.next();
+                chars.next();
+                nots += 1;
+            }
+            c if c.is_whitespace() => {}
+            _ => nots = 0,
+        }
+        max = max.max(open + nots);
+        prev = c;
+    }
+    max
+}
+
 pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
     let schema = index.schema();
     Ok(match spec {
@@ -394,6 +457,17 @@ pub fn build(spec: &QuerySpec, index: &Index) -> FfiResult<Box<dyn Query>> {
             }
             let parse_error =
                 |e: tantivy::query::QueryParserError| FfiError::new(ffi::status::QUERY_PARSE, e.to_string());
+            // Checked before the grammar runs: past the limit it would overflow the stack.
+            if nesting_depth(text) > MAX_QUERY_NESTING {
+                if *lenient {
+                    // Nothing in the text can be parsed safely, so nothing of it is kept.
+                    return Ok(Box::new(EmptyQuery));
+                }
+                return Err(FfiError::new(
+                    ffi::status::QUERY_PARSE,
+                    format!("the query nests parentheses or NOT more than {MAX_QUERY_NESTING} levels deep"),
+                ));
+            }
             // Normally straight from the text; through the grammar's AST only when a range needs fixing.
             if *lenient {
                 let (mut ast, _) = query_grammar::parse_query_lenient(text);
@@ -1058,5 +1132,54 @@ mod tests {
             q = format!(r#"{{"type":"boolean","must":[{q}]}}"#);
         }
         assert_invalid(&f, &q, "recursion limit");
+    }
+
+    #[test]
+    fn nesting_depth_counts_what_the_grammar_recurses_on() {
+        for (text, depth) in [
+            ("mice", 0),
+            ("(mice)", 1),
+            ("title:(mice OR men) AND (a (b))", 2),
+            ("NOT mice", 1),
+            ("NOT NOT NOT mice", 3),
+            ("NOT (NOT (mice))", 4),
+            ("-(+(mice))", 2),
+            ("(((mice", 3),        // unbalanced: what's open still counts
+            ("mice)))", 0),        // stray closers don't go negative
+            (r#""((((" mice"#, 0), // inside a phrase
+            (r"\(\(\( mice", 0),   // escaped
+            ("NOTE NOTICE xNOT mice", 0),
+            ("NOT", 0), // the grammar only nests `NOT` followed by whitespace
+        ] {
+            assert_eq!(nesting_depth(text), depth, "{text}");
+        }
+    }
+
+    #[test]
+    fn deeply_nested_query_text_is_refused_before_the_grammar_runs() {
+        // Without the limit, a few hundred levels overflow the stack inside Tantivy's grammar and
+        // abort the process. These depths would crash any thread; here they must return.
+        let f = books();
+        let parse = |text: &str, lenient: bool| {
+            f.try_count(&serde_json::json!({"type": "parse", "text": text, "lenient": lenient}).to_string())
+        };
+        for depth in [MAX_QUERY_NESTING + 1, 1_000, 100_000] {
+            let shapes = [
+                format!("{}title:mice{}", "(".repeat(depth), ")".repeat(depth)),
+                format!("{}mice", "(".repeat(depth)),
+                format!("{}mice{}", "+(".repeat(depth), ")".repeat(depth)),
+                format!("{}mice", "NOT ".repeat(depth)),
+            ];
+            for text in &shapes {
+                assert_eq!(parse(text, true).unwrap(), 0, "lenient drops it: depth {depth}");
+                let e = parse(text, false).unwrap_err();
+                assert_eq!(e.code, ffi::status::QUERY_PARSE, "strict reports it: depth {depth}");
+                assert!(e.message.contains("levels deep"), "{}", e.message);
+            }
+        }
+        // At the limit, queries still run.
+        let ok = format!("{}title:mice{}", "(".repeat(MAX_QUERY_NESTING), ")".repeat(MAX_QUERY_NESTING));
+        assert_eq!(parse(&ok, false).unwrap(), 1);
+        assert_eq!(parse(&ok, true).unwrap(), 1);
     }
 }

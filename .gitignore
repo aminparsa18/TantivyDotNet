@@ -19,3 +19,7 @@ coverage/
 docs/_site/
 docs/api/*.yml
 docs/api/.manifest
+
+# Local Claude Code skills and internal security docs (not published)
+.claude/
+docs-internal/
