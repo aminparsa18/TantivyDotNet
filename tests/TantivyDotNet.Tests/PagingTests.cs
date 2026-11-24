@@ -283,8 +283,14 @@ public class PagingTests
             Assert.All(page, h => Assert.Equal(0UL, h.SortValues[0]));
             cursor = page[^1].Cursor;
         }
+        // A commit, so there's always a new snapshot (background merges may already have left one
+        // segment, and then ForceMerge alone changes nothing), then a merge to renumber documents.
         using (var writer = index.CreateWriter())
+        {
+            writer.AddDocument("""{"id":"z99","group":3,"text":"mice"}""");
+            writer.Commit();
             writer.ForceMerge(1);
+        }
         Assert.True(manager.Refresh());
 
         using var newer = manager.Acquire();
