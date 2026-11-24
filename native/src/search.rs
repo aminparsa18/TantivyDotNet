@@ -3,7 +3,7 @@
 //!
 //! Request: `{"query": {...}, "limit": n, "offset": n, "sort": [...]?, "search_after": {...}?, "fields": [...]?,
 //! "snippets": {...}?, "facets": [...]?, "aggregations": {...}?}`.
-//! Result: `{"count": <total matches>, "hits": [{"score": f|null, "sort": [...], "addr": [segment, doc],
+//! Result: `{"count": <total matches>, "snapshot": "<sorting::snapshot_id>", "hits": [{"score": f|null, "sort": [...], "addr": [segment, doc],
 //! "doc": {"field": [values...]}, "snippets": {...}?}], "facets": {...}?, "aggregations": {...}?}`
 //! (see the `sorting`, `snippets`, `facets` and `aggregations` modules). `limit == 0` only counts.
 
@@ -53,6 +53,8 @@ fn default_limit() -> usize {
 #[derive(Serialize)]
 struct SearchResultJson<'a> {
     count: usize,
+    /// Identifies the searcher's snapshot, for cursors (see `sorting::snapshot_id`).
+    snapshot: String,
     hits: Vec<HitJson<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     facets: Option<FacetResultJson>,
@@ -90,7 +92,14 @@ pub fn run(searcher: &Searcher, index: &Index, request_json: &str) -> FfiResult<
         0 => None,
         // Planned (and so validated) even when the page turns out empty.
         _ => {
-            let plan = sorting::plan(&request.sort, request.search_after.as_ref(), limit, request.offset, &schema)?;
+            let plan = sorting::plan(
+                &request.sort,
+                request.search_after.as_ref(),
+                limit,
+                request.offset,
+                &schema,
+                &sorting::snapshot_id(searcher),
+            )?;
             (limit > 0).then_some(plan)
         }
     };
@@ -143,7 +152,8 @@ pub fn run(searcher: &Searcher, index: &Index, request_json: &str) -> FfiResult<
         })
         .collect::<FfiResult<Vec<_>>>()?;
 
-    serde_json::to_string(&SearchResultJson { count, hits, facets, aggregations })
+    let snapshot = sorting::snapshot_id(searcher);
+    serde_json::to_string(&SearchResultJson { count, snapshot, hits, facets, aggregations })
         .map_err(|e| FfiError::new(status::ERROR, format!("result serialization: {e}")))
 }
 

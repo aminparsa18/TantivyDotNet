@@ -114,6 +114,20 @@ while (page.Count > 0)
 }
 ```
 
+A cursor is a string, so you can hand it to a client and get it back with the next request. It stays valid after the index changes, so a server can read each page from whatever searcher its `SearcherManager` currently has:
+
+- On the searcher that returned the cursor, the next page is exact.
+- On a newer searcher (after a commit or merge), paging continues with the documents that sort after the cursor's sort values. Documents committed meanwhile show up if they sort after the cursor; deleted ones disappear; a document whose sort value changed can show up twice or not at all.
+- Documents tied with the cursor on every sort key are skipped on a newer searcher. End `OrderBy` with a unique fast field, such as the document's id, so no two documents tie:
+
+```csharp
+var order = new[] { SortBy.Field("year", descending: true), SortBy.Field("id") };
+```
+
+- Relevance scores change as the index changes, so paging by score across commits is approximate.
+
+To page through one unchanging snapshot instead, keep the same `Searcher` or `SearcherLease` for the whole listing. Start over (without `SearchAfter`) when the user changes the query or the order: a cursor only works with the `OrderBy` it came from.
+
 `OrderBy` takes fast fields (of any type except facet and JSON) and `SortBy.Score()`. Documents without a value come last in both directions. Unless the score is a sort key, it isn't computed and `hit.Score` is `NaN`. `hit.SortValues` holds the values the hit was sorted by.
 
 ### Snippets

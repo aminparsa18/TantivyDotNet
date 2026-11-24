@@ -3,11 +3,13 @@
 //! through `SortedTop`. Both of ours are top-K collectors that also take a search-after cursor.
 //!
 //! Request part: `"sort": [{"type": "field", "field": "year", "order": "desc"}, {"type": "score"}]`
-//! (absent or empty = by score), and `"search_after": {"keys": [...], "addr": [segment, doc]}`.
+//! (absent or empty = by score), and `"search_after": {"keys": [...], "addr": [segment, doc], "snapshot": "..."}`.
 //! Per hit: `"sort": [...]`, one tagged value per key (`{"score": f}`, `{"u64": n}`, `{"str": s}`, `{"ip": s}`,
 //! dates as `{"date": unix_micros}`, ...) or `null` when the document has no value. Documents
 //! without a value come last in both orders; the document address breaks ties, so paging with a
-//! cursor is stable within one snapshot.
+//! cursor is exact within one snapshot. Addresses mean nothing in another snapshot (a merge
+//! renumbers documents), so a cursor from another snapshot (see [`snapshot_id`]) drops its address:
+//! documents tied with it on every key count as already seen.
 
 use std::cmp::Ordering;
 use std::net::{IpAddr, Ipv6Addr};
@@ -46,6 +48,23 @@ pub enum SortOrder {
 pub struct SearchAfter {
     keys: Vec<Value>,
     addr: [u32; 2],
+    /// The [`snapshot_id`] of the searcher the cursor came from; absent in older cursors.
+    #[serde(default)]
+    snapshot: Option<String>,
+}
+
+/// Identifies a searcher's snapshot for cursors: a hash of its segment IDs in segment order. Two
+/// searchers with the same segments give every document the same address (deletes don't
+/// renumber documents), so a cursor's address is only used when this matches.
+pub fn snapshot_id(searcher: &tantivy::Searcher) -> String {
+    // FNV-1a: stable across processes and versions, unlike the std hasher.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for reader in searcher.segment_readers() {
+        for b in reader.segment_id().uuid_string().bytes().chain(*b";") {
+            hash = (hash ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    format!("{hash:016x}")
 }
 
 /// A top hit: its score (NaN when the score isn't a sort key, because scoring is skipped), its
@@ -74,6 +93,7 @@ pub fn plan(
     limit: usize,
     offset: usize,
     schema: &Schema,
+    snapshot: &str,
 ) -> FfiResult<TopPlan> {
     if sort.is_empty() && after.is_none() {
         return Ok(TopPlan::Score { limit, offset });
@@ -83,7 +103,7 @@ pub fn plan(
     } else {
         sort.iter().map(|k| resolve(k, schema)).collect::<FfiResult<_>>()?
     };
-    let cursor = after.map(|a| parse_cursor(a, &keys)).transpose()?;
+    let cursor = after.map(|a| parse_cursor(a, &keys, snapshot)).transpose()?;
     if let [Key { source: Source::Field { name, kind }, desc }] = keys.as_slice() {
         if kind.is_numeric() {
             let cursor = cursor.map(|c| (to_u64(&c.values[0]), c.addr));
@@ -308,7 +328,7 @@ fn parse_ip(text: &str) -> Option<Ipv6Addr> {
     }
 }
 
-fn parse_cursor(after: &SearchAfter, keys: &[Key]) -> FfiResult<Cursor> {
+fn parse_cursor(after: &SearchAfter, keys: &[Key], snapshot: &str) -> FfiResult<Cursor> {
     let mismatch = || FfiError::invalid("the search-after cursor doesn't match the sort order of this search");
     if after.keys.len() != keys.len() {
         return Err(mismatch());
@@ -345,7 +365,12 @@ fn parse_cursor(after: &SearchAfter, keys: &[Key]) -> FfiResult<Cursor> {
             value.ok_or_else(mismatch)
         })
         .collect::<FfiResult<Vec<_>>>()?;
-    Ok(Cursor { values, addr: DocAddress::new(after.addr[0], after.addr[1]) })
+    // From another snapshot, the largest address: no document tied on every key sorts after it.
+    let addr = match after.snapshot.as_deref() {
+        Some(s) if s == snapshot => DocAddress::new(after.addr[0], after.addr[1]),
+        _ => DocAddress::new(u32::MAX, u32::MAX),
+    };
+    Ok(Cursor { values, addr })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -946,7 +971,10 @@ mod tests {
             let raw = result["hits"].as_array().unwrap();
             ids.extend(hits(&result).iter().map(|h| h.id));
             let Some(last) = raw.last() else { return ids };
-            after = format!(r#","search_after":{{"keys":{},"addr":{}}}"#, last["sort"], last["addr"]);
+            after = format!(
+                r#","search_after":{{"keys":{},"addr":{},"snapshot":{}}}"#,
+                last["sort"], last["addr"], result["snapshot"]
+            );
             assert!(ids.len() <= 10_000, "cursor paging doesn't end");
         }
     }
@@ -1077,7 +1105,10 @@ mod tests {
         assert_eq!(scores(&plain), scores(&by_score));
         // A cursor without a sort pages by score too.
         let first = &plain["hits"][0];
-        let after = format!(r#","search_after":{{"keys":{},"addr":{}}}"#, first["sort"], first["addr"]);
+        let after = format!(
+            r#","search_after":{{"keys":{},"addr":{},"snapshot":{}}}"#,
+            first["sort"], first["addr"], plain["snapshot"]
+        );
         let rest = f.search(&format!(r#"{{"query":{HALF},"limit":100000{after}}}"#)).unwrap();
         assert_eq!(hits(&rest).len(), hits(&plain).len() - 1);
     }
@@ -1087,7 +1118,7 @@ mod tests {
         let (f, _) = corpus(1);
         let schema = f.index.schema();
         let keys = |json: &str| serde_json::from_str::<Vec<SortKeyRequest>>(json).unwrap();
-        let plan_for = |json: &str| plan(&keys(json), None, 10, 0, &schema).ok().unwrap();
+        let plan_for = |json: &str| plan(&keys(json), None, 10, 0, &schema, "").ok().unwrap();
         assert!(matches!(plan_for("[]"), TopPlan::Score { limit: 10, offset: 0 }));
         for numeric in ["id", "n", "f", "d", "flag"] {
             let json = format!(r#"[{{"type":"field","field":"{numeric}","order":"desc"}}]"#);

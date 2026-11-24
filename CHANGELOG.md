@@ -4,6 +4,10 @@ All notable changes to TantivyDotNet are listed here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Fixed
+
+- A `SearchAfter` cursor used on a newer searcher, for example after a `SearcherManager` refresh, could return its own hit again and skip or repeat other documents tied with it on every sort key, because it compared document addresses that a merge had renumbered. A cursor now knows which snapshot it came from. On another snapshot, paging continues by sort value and skips the documents tied with the cursor; with a unique last sort key, such as an id, nothing is skipped or repeated. The `SearchAfter` documentation and the paging guide describe what happens to a cursor when the index changes. Cursors from 1.0.0-rc.1 still work and are treated as coming from another snapshot.
+
 ## [1.0.0-rc.1] - 2026-11-23
 
 The first release candidate. The public API is frozen: it's listed in `PublicAPI.Shipped.txt`, and 1.0.0 will ship it unchanged unless feedback on this release candidate turns up a problem. Any such change will be listed here.

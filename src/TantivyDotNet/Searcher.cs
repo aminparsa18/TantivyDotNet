@@ -284,12 +284,13 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
 
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
-    // Shape: {"count": n, "hits": [{"score": f, "addr": [s, d], "doc": {...}, "snippets"?: {...}}]} (see native/src/search.rs).
+    // Shape: {"count": n, "snapshot": "...", "hits": [{"score": f, "addr": [s, d], "doc": {...}, "snippets"?: {...}}]} (see native/src/search.rs).
     // `root` is self-contained (see Ffi.TakeJson), so hits keep elements of it without copying.
     internal static SearchResults Parse(JsonElement root, Searcher origin, SearchOptions options)
     {
         string signature = options.OrderSignature;
         bool sorted = options.OrderBy is { Count: > 0 };
+        string? snapshot = root.GetProperty("snapshot").GetString();
         var hitsJson = root.GetProperty("hits");
         var hits = new SearchHit[hitsJson.GetArrayLength()];
         int i = 0;
@@ -306,7 +307,7 @@ public sealed class SearchResults : IReadOnlyList<SearchHit>
                 DocId = docId,
                 Snippets = h.TryGetProperty("snippets", out var sn) ? ParseSnippets(sn) : SearchHit.NoSnippets,
                 SortValues = sorted ? ParseSortValues(sort) : SearchHit.NoSortValues,
-                CursorData = new HitCursor(signature, sort, segmentOrd, docId),
+                CursorData = new HitCursor(signature, sort, segmentOrd, docId, snapshot),
             };
         }
         var facets = root.TryGetProperty("facets", out var fj) ? ParseFacets(fj) : NoFacets;

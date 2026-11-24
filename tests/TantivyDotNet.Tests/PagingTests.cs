@@ -209,6 +209,94 @@ public class PagingTests
         }
     }
 
+    /// <summary>
+    /// The case the paging docs describe: page 1 comes from one searcher, then the index commits
+    /// (adds and deletes) and merges, and the next pages come from the refreshed searcher of a
+    /// <see cref="SearcherManager"/>. With a unique field as the last sort key, the cursor still
+    /// works: the rest of the pages are exactly the new snapshot's hits that sort after it.
+    /// </summary>
+    [Fact]
+    public void Cursor_FromAnOlderSnapshot_ContinuesBySortValue_WithAUniqueLastKey()
+    {
+        using var index = Index();
+        using var manager = index.CreateSearcherManager();
+        IReadOnlyList<SortBy> order = [SortBy.Field("group"), SortBy.Field("id")];
+
+        string cursor;
+        List<string?> page1;
+        using (var lease = manager.Acquire())
+        {
+            var page = lease.Searcher.Search(Query.All, new SearchOptions { Limit = 10, OrderBy = order });
+            page1 = [.. Ids(page)];
+            cursor = page[^1].Cursor;
+        }
+
+        using (var writer = index.CreateWriter())
+        {
+            writer.DeleteTerm("id", page1[3]!);   // already returned
+            writer.DeleteTerm("id", "r57");       // not returned yet
+            for (int i = 60; i < 70; i++)         // new documents on both sides of the cursor
+                writer.AddDocument($$"""{"id":"n{{i}}","group":{{i % 4}},"text":"mice"}""");
+            writer.Commit();
+            writer.ForceMerge(1);                 // renumbers every document
+        }
+        Assert.True(manager.Refresh());
+
+        using (var lease = manager.Acquire())
+        {
+            var searcher = lease.Searcher;
+            var all = Ids(searcher.Search(Query.All, new SearchOptions { Limit = 1000, OrderBy = order })).ToList();
+            var expected = all.Skip(all.IndexOf(page1[^1]) + 1).ToList();
+
+            var rest = new List<string?>();
+            for (var page = searcher.Search(Query.All, new SearchOptions { Limit = 7, OrderBy = order, SearchAfter = cursor });
+                 page.Count > 0;
+                 page = searcher.Search(Query.All, new SearchOptions { Limit = 7, OrderBy = order, SearchAfter = page[^1].Cursor }))
+                rest.AddRange(Ids(page));
+
+            Assert.Equal(expected, rest);
+            Assert.DoesNotContain("r57", rest);
+            Assert.Empty(rest.Intersect(page1));
+            // New documents that sort before the cursor aren't seen: n60 and n64 are in group 0,
+            // before r40 (the last hit of page 1). n61 is in group 1, after it.
+            Assert.DoesNotContain("n60", rest);
+            Assert.Contains("n61", rest);
+        }
+    }
+
+    /// <summary>
+    /// Without a unique last key, a cursor from an older snapshot can't tell the documents tied
+    /// with it apart, so it skips them all instead of repeating some: page 1 ends inside group 0,
+    /// and after a merge the next page starts at group 1.
+    /// </summary>
+    [Fact]
+    public void Cursor_FromAnOlderSnapshot_SkipsDocumentsTiedWithIt()
+    {
+        using var index = Index();
+        using var manager = index.CreateSearcherManager();
+        IReadOnlyList<SortBy> order = [SortBy.Field("group")];
+
+        string cursor;
+        using (var lease = manager.Acquire())
+        {
+            var page = lease.Searcher.Search(Query.All, new SearchOptions { Limit = 10, OrderBy = order });
+            Assert.All(page, h => Assert.Equal(0UL, h.SortValues[0]));
+            cursor = page[^1].Cursor;
+        }
+        using (var writer = index.CreateWriter())
+            writer.ForceMerge(1);
+        Assert.True(manager.Refresh());
+
+        using var newer = manager.Acquire();
+        var next = newer.Searcher.Search(Query.All, new SearchOptions { Limit = 10, OrderBy = order, SearchAfter = cursor });
+        Assert.Equal(1UL, next[0].SortValues[0]);
+
+        // A cursor used on the snapshot it came from still continues inside group 0.
+        var first = newer.Searcher.Search(Query.All, new SearchOptions { Limit = 10, OrderBy = order });
+        var exact = newer.Searcher.Search(Query.All, new SearchOptions { Limit = 10, OrderBy = order, SearchAfter = first[^1].Cursor });
+        Assert.Equal(0UL, exact[0].SortValues[0]);
+    }
+
     [Fact]
     public void Cursor_MismatchedOrderOffsetAndGarbage_Throw()
     {

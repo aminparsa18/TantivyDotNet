@@ -26,7 +26,7 @@ var indexing = Task.Run(async () =>
 
 ## Snapshots and commits
 
-A searcher sees the index as of the last commit before it was created. Later commits don't change it: queries on one searcher are consistent with each other, and paging with `SearchAfter` stays exact. To see new commits, get a new searcher:
+A searcher sees the index as of the last commit before it was created. Later commits don't change it: queries on one searcher are consistent with each other, and paging with `SearchAfter` stays exact. Cursors also work on a newer searcher, which continues by sort value (see [paging](queries.md#paging-and-sorting)). To see new commits, get a new searcher:
 
 - **`index.CreateSearcher()`** is cheap (it reloads the list of segments) and suits scripts, tests and batch jobs.
 - **A `SearcherManager`** suits servers. It hands out one shared searcher and replaces it after commits. Each request takes a lease, which keeps its searcher alive until disposed, even after it's been replaced:

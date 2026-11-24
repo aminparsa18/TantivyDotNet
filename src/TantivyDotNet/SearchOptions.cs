@@ -94,10 +94,31 @@ public sealed class SearchOptions
     /// (the default) starts from the first hit.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// The cursor must come from a search with the same <see cref="OrderBy"/>, and <see cref="Offset"/>
-    /// must be 0. Pages are exact when every page is read from the same <see cref="Searcher"/>; with
-    /// a newer searcher, paging continues by sort value, but documents tied on every key may be
-    /// skipped or repeated. <see cref="SearchResults.TotalCount"/> still counts all matches.
+    /// must be 0. <see cref="SearchResults.TotalCount"/> still counts all matches.
+    /// </para>
+    /// <para>
+    /// A cursor stays valid after commits and merges, so the pages of one listing can come from
+    /// different searchers, for example from a <see cref="SearcherManager"/> that refreshes between
+    /// two requests. On the searcher that returned it, paging is exact. On a newer one, it continues
+    /// with the documents of the new snapshot that sort after the cursor's sort values:
+    /// </para>
+    /// <list type="bullet">
+    /// <item>Documents committed meanwhile appear on a later page if they sort after the cursor, and
+    /// are never seen if they sort before it. Deleted documents disappear.</item>
+    /// <item>A document whose sort value changed (for example through
+    /// <see cref="IndexWriter.UpdateDocument(TermQuery, string)"/>) can be returned twice or not at all.</item>
+    /// <item>Documents tied with the cursor on every sort key are skipped, because the cursor can't
+    /// tell them apart in another snapshot. Make the last key unique, such as an id stored as a
+    /// fast field, to avoid this: <c>OrderBy = [SortBy.Field("date", descending: true), SortBy.Field("id")]</c>.</item>
+    /// <item>Relevance scores can change with the index (they depend on how common each term is), so
+    /// paging by <see cref="SortBy.Score"/> across snapshots is approximate.</item>
+    /// </list>
+    /// <para>
+    /// To page through one fixed snapshot instead, keep the same <see cref="Searcher"/> (or
+    /// <see cref="SearcherLease"/>) for the whole listing.
+    /// </para>
     /// </remarks>
     /// <example>
     /// <code>
@@ -207,6 +228,7 @@ public sealed class SearchOptions
                 w.WriteNumberValue(cursor.SegmentOrd);
                 w.WriteNumberValue(cursor.DocId);
                 w.WriteEndArray();
+                if (cursor.Snapshot is not null) w.WriteString("snapshot", cursor.Snapshot);
                 w.WriteEndObject();
             }
             if (Fields is not null)
@@ -298,13 +320,15 @@ public sealed class SortBy
 }
 
 /// <summary>
-/// The opaque <see cref="SearchHit.Cursor"/>: base64url of <c>{"o": order signature, "k": [tagged sort values], "a": [segment, doc]}</c>.
+/// The opaque <see cref="SearchHit.Cursor"/>: base64url of <c>{"o": order signature, "k": [tagged sort values], "a": [segment, doc], "s": snapshot}</c>.
 /// </summary>
 /// <remarks>
 /// <see cref="SortKeys"/> is the hit's <c>sort</c> array as returned by native code; it is only
-/// serialized when <see cref="SearchHit.Cursor"/> is read.
+/// serialized when <see cref="SearchHit.Cursor"/> is read. <see cref="Snapshot"/> identifies the
+/// searcher's snapshot (see <c>snapshot_id</c> in native/src/sorting.rs); the address is only used
+/// on a searcher with the same snapshot. Null in cursors from 1.0.0-rc.1, which had none.
 /// </remarks>
-internal readonly record struct HitCursor(string OrderSignature, JsonElement SortKeys, uint SegmentOrd, uint DocId)
+internal readonly record struct HitCursor(string OrderSignature, JsonElement SortKeys, uint SegmentOrd, uint DocId, string? Snapshot)
 {
     public string Encode()
     {
@@ -319,6 +343,7 @@ internal readonly record struct HitCursor(string OrderSignature, JsonElement Sor
             w.WriteNumberValue(SegmentOrd);
             w.WriteNumberValue(DocId);
             w.WriteEndArray();
+            if (Snapshot is not null) w.WriteString("s", Snapshot);
             w.WriteEndObject();
         }
         return Convert.ToBase64String(buffer.WrittenSpan).TrimEnd('=').Replace('+', '-').Replace('/', '_');
@@ -335,7 +360,8 @@ internal readonly record struct HitCursor(string OrderSignature, JsonElement Sor
             var keys = root.GetProperty("k");
             if (keys.ValueKind != JsonValueKind.Array) throw new FormatException();
             var addr = root.GetProperty("a");
-            return new HitCursor(root.GetProperty("o").GetString()!, keys, addr[0].GetUInt32(), addr[1].GetUInt32());
+            string? snapshot = root.TryGetProperty("s", out var s) ? s.GetString() : null;
+            return new HitCursor(root.GetProperty("o").GetString()!, keys, addr[0].GetUInt32(), addr[1].GetUInt32(), snapshot);
         }
         catch (Exception e) when (e is FormatException or JsonException or KeyNotFoundException or InvalidOperationException or IndexOutOfRangeException)
         {
