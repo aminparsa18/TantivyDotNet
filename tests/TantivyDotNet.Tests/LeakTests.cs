@@ -121,6 +121,13 @@ public class LeakTests
 
         for (int i = 0; i < rounds; i++) Cycle(i);
         var after = Usage.Now();
+        // Tantivy's worker threads exit asynchronously after Dispose, so right after the last cycle
+        // a few may still be shutting down. Give them up to 5 seconds; leaked threads never exit.
+        for (var settle = Stopwatch.StartNew(); after.Threads - before.Threads >= 8 && settle.Elapsed < TimeSpan.FromSeconds(5);)
+        {
+            Thread.Sleep(100);
+            after = Usage.Now();
+        }
 
 
         // Each cycle allocates tens of MB natively (a 15 MB writer arena alone), so a leak per cycle
